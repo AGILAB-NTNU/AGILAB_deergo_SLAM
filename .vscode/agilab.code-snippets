@@ -1,0 +1,53 @@
+{
+  "AGILAB SystemVerilog Header": {
+    "prefix": "agi-IC-header",
+    "scope": "verilog,systemverilog",
+    "body": [
+      "//////////////////////////////////////////////////////////////////////////////////",
+      "// Company: ${1|AGILAB,NTNU|}",
+      "// Engineer: ${2|Master Student,Undergraduate Student,PhD Student,Professor|}",
+      "// ",
+      "// Create Date: $CURRENT_YEAR/$CURRENT_MONTH/$CURRENT_DATE $CURRENT_HOUR:$CURRENT_MINUTE:$CURRENT_SECOND",
+      "// Design Name: ${3:Project_Name}",
+      "// Module Name: $TM_FILENAME_BASE",
+      "// Project Name: ",
+      "// Target Devices: ",
+      "// Tool Versions: ",
+      "// Description: $4",
+      "// Coding Rules:",
+      "//   Ports     : i_* = inputs, o_* = outputs (e.g. i_clk, i_rst_n, i_a, i_b, o_y)",
+      "//   Regs      : *_r = registers, *_next = combinational next-state signals",
+      "//   Reset     : active-low synchronous reset (i_rst_n), posedge i_clk only",
+      "//   FSM       : strict 3-block style; assign defaults in always_comb; no latches",
+      "//   Handshake : *_vld / *_rdy naming",
+      "//   Systolic  : u_PE_R[r]_C[c], pe_data_east/south, *_ping / *_pong",
+      "//   Safety    : avoid bit-width mismatches",
+      "// ",
+      "// Dependencies: ",
+      "// ",
+      "// Revision:",
+      "// Revision 0.01 - File Created",
+      "// Additional Comments:",
+      "// ",
+      "//////////////////////////////////////////////////////////////////////////////////",
+      "$0"
+    ],
+    "description": "AGILAB Standard SystemVerilog Header with AI Coding Rules"
+  },
+  "AGILAB Python Header": {
+    "prefix": "agi-header",
+    "scope": "python",
+    "body": [
+      "\"\"\"",
+      "Module: $TM_FILENAME_BASE",
+      "Stage: ${1|Library,Notebook,Script|}",
+      "Author: ${2|Master Student,Undergraduate Student,PhD Student,Professor|}",
+      "Date: $CURRENT_YEAR-$CURRENT_MONTH-$CURRENT_DATE",
+      "Description: ${3:ShortDescription}",
+      "\"\"\"",
+      "",
+      "$0"
+    ],
+    "description": "AGILAB 標準 Python 檔案標頭"
+  }
+}

@@ -1,0 +1,34 @@
+name: Publish Docs
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+
+      - name: Install dependencies
+        run: pip install mkdocs-material
+
+      - name: Sync READMEs to docs
+        run: |
+          [ -f README.md ] || touch README.md
+          [ -f README_zh.md ] || touch README_zh.md
+          cp README.md docs/index.md
+          cp README_zh.md docs/README_zh.md
+
+      - name: Deploy to GitHub Pages
+        run: mkdocs gh-deploy --force
