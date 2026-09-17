@@ -491,7 +491,7 @@ active [3]
 After restarting the computer, enter the workspace:
 
 ```bash
-cd ~/deergo_ws
+cd src/deergo_ws
 ```
 
 Load the network and ROS 2 environment:
