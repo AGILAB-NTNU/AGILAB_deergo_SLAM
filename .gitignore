@@ -58,6 +58,7 @@ MANIFEST
 
 
 # 3. ROS 2 與測試暫存
+install/
 build/
 log/
 *.db3
