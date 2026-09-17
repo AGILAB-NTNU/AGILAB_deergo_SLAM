@@ -48,23 +48,19 @@ class ScanRawDump(Node):
 
             f.write(f"frame_id: {msg.header.frame_id}\n")
 
-            f.write(
-                f"stamp: "
-                f"{msg.header.stamp.sec}."
-                f"{msg.header.stamp.nanosec:09d}\n"
-            )
+            f.write(f"stamp: {msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}\n")
 
             f.write(f"angle_min_rad: {msg.angle_min}\n")
 
             f.write(f"angle_max_rad: {msg.angle_max}\n")
 
-            f.write(f"angle_increment_rad: " f"{msg.angle_increment}\n")
+            f.write(f"angle_increment_rad: {msg.angle_increment}\n")
 
             f.write(f"range_min_m: {msg.range_min}\n")
 
             f.write(f"range_max_m: {msg.range_max}\n")
 
-            f.write(f"number_of_ranges: " f"{len(msg.ranges)}\n")
+            f.write(f"number_of_ranges: {len(msg.ranges)}\n")
 
             f.write("==============================\n\n")
 
@@ -80,7 +76,7 @@ class ScanRawDump(Node):
                 angle_deg = math.degrees(angle_rad)
 
                 if math.isfinite(distance):
-                    f.write(f"{i}\t" f"{angle_deg:.4f}\t" f"{distance:.4f}\n")
+                    f.write(f"{i}\t{angle_deg:.4f}\t{distance:.4f}\n")
 
                     # 另外記下非常近的點
                     if distance < 0.30:
@@ -93,13 +89,13 @@ class ScanRawDump(Node):
                         )
 
                 else:
-                    f.write(f"{i}\t" f"{angle_deg:.4f}\t" f"inf\n")
+                    f.write(f"{i}\t{angle_deg:.4f}\tinf\n")
 
             # ====================================================
             # < 0.30 m summary
             # ====================================================
 
-            f.write("\n\n" "========================================\n")
+            f.write("\n\n========================================\n")
 
             f.write("Points closer than 0.30 m\n")
 
@@ -112,7 +108,7 @@ class ScanRawDump(Node):
                 angle_deg,
                 distance,
             ) in close_points:
-                f.write(f"{index}\t" f"{angle_deg:.4f}\t" f"{distance:.4f}\n")
+                f.write(f"{index}\t{angle_deg:.4f}\t{distance:.4f}\n")
 
         # ========================================================
         # Terminal summary

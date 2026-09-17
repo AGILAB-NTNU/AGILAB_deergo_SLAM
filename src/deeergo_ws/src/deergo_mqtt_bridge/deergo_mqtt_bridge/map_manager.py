@@ -141,11 +141,11 @@ class MapManager(Node):
 
         if save_result.result != 0:
             self.get_logger().error(
-                f"SLAM map save failed: " f"result={save_result.result}"
+                f"SLAM map save failed: result={save_result.result}"
             )
 
             response.success = False
-            response.message = f"SLAM map save failed: " f"result={save_result.result}"
+            response.message = f"SLAM map save failed: result={save_result.result}"
 
             return response
 
@@ -175,15 +175,13 @@ class MapManager(Node):
             self.get_logger().error("Pose graph serialization timeout")
 
             response.success = False
-            response.message = (
-                "Map image saved, " "but pose graph serialization timed out"
-            )
+            response.message = "Map image saved, but pose graph serialization timed out"
 
             return response
 
         if serialize_result.result != 0:
             self.get_logger().error(
-                f"Pose graph serialization failed: " f"result={serialize_result.result}"
+                f"Pose graph serialization failed: result={serialize_result.result}"
             )
 
             response.success = False

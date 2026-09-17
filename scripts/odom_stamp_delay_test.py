@@ -111,13 +111,13 @@ class OdomStampDelayTest(Node):
         if delays:
             print(f"Samples : {len(delays)}")
 
-            print(f"Mean    : " f"{statistics.mean(delays):.3f} ms")
+            print(f"Mean    : {statistics.mean(delays):.3f} ms")
 
-            print(f"STD     : " f"{statistics.pstdev(delays):.3f} ms")
+            print(f"STD     : {statistics.pstdev(delays):.3f} ms")
 
-            print(f"Min     : " f"{min(delays):.3f} ms")
+            print(f"Min     : {min(delays):.3f} ms")
 
-            print(f"Max     : " f"{max(delays):.3f} ms")
+            print(f"Max     : {max(delays):.3f} ms")
 
         print(f"CSV     : {path}")
 

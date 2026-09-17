@@ -96,16 +96,16 @@ class ScanBridge(Node):
         self.get_logger().info("Output : /scan_sync")
 
         self.get_logger().info(
-            f"Startup offset calibration: " f"{CALIBRATION_SAMPLES} frames"
+            f"Startup offset calibration: {CALIBRATION_SAMPLES} frames"
         )
 
         self.get_logger().info("During calibration, /scan_sync is paused")
 
         self.get_logger().info("Hard-coded LiDAR body filter enabled")
 
-        self.get_logger().info("Rear filter: " "+169~+180 deg, -180~-176 deg")
+        self.get_logger().info("Rear filter: +169~+180 deg, -180~-176 deg")
 
-        self.get_logger().info("Pillar filter: " "-167~-162 deg, +162~+167 deg")
+        self.get_logger().info("Pillar filter: -167~-162 deg, +162~+167 deg")
 
         self.get_logger().info("========================================")
 
@@ -203,7 +203,7 @@ class ScanBridge(Node):
 
         if sample_count == 1 or sample_count % 10 == 0:
             self.get_logger().info(
-                f"Offset calibration: " f"{sample_count}/" f"{CALIBRATION_SAMPLES}"
+                f"Offset calibration: {sample_count}/{CALIBRATION_SAMPLES}"
             )
 
         # ========================================================
@@ -251,21 +251,21 @@ class ScanBridge(Node):
 
         self.get_logger().info("LiDAR offset calibration FINISHED")
 
-        self.get_logger().info(f"Samples       : " f"{CALIBRATION_SAMPLES}")
+        self.get_logger().info(f"Samples       : {CALIBRATION_SAMPLES}")
 
-        self.get_logger().info(f"MIN offset    : " f"{min_sec:.9f} s")
+        self.get_logger().info(f"MIN offset    : {min_sec:.9f} s")
 
-        self.get_logger().info(f"AVG offset    : " f"{avg_sec:.9f} s")
+        self.get_logger().info(f"AVG offset    : {avg_sec:.9f} s")
 
-        self.get_logger().info(f"MAX offset    : " f"{max_sec:.9f} s")
+        self.get_logger().info(f"MAX offset    : {max_sec:.9f} s")
 
-        self.get_logger().info(f"Offset jitter : " f"{jitter_ms:.3f} ms")
+        self.get_logger().info(f"Offset jitter : {jitter_ms:.3f} ms")
 
-        self.get_logger().info(f"FIXED OFFSET  : " f"{min_sec:.9f} s")
+        self.get_logger().info(f"FIXED OFFSET  : {min_sec:.9f} s")
 
         self.get_logger().info("Offset is now LOCKED")
 
-        self.get_logger().info("/scan_sync publishing starts " "from next frame")
+        self.get_logger().info("/scan_sync publishing starts from next frame")
 
         self.get_logger().info("========================================")
 
@@ -290,7 +290,7 @@ class ScanBridge(Node):
         # ========================================================
 
         if lidar_ns <= 0:
-            self.get_logger().warning("Invalid LiDAR timestamp. " "Scan ignored.")
+            self.get_logger().warning("Invalid LiDAR timestamp. Scan ignored.")
 
             return
 

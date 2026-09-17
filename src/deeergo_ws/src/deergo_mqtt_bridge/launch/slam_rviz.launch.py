@@ -166,9 +166,7 @@ def generate_launch_description():
         "load_map",
         default_value="false",
         description=(
-            "false = mapping, "
-            "true = load serialized map "
-            "and use localization mode"
+            "false = mapping, true = load serialized map and use localization mode"
         ),
     )
 

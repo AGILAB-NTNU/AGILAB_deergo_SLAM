@@ -174,9 +174,7 @@ class DeerGoMqttBridge(Node):
 
         if self.cmd_vel_count % 10 == 0:
             self.get_logger().info(
-                f"/cmd_vel -> MQTT | "
-                f"vel={vel_ms:.3f} m/s | "
-                f"turn={turn_degs:.1f} deg/s"
+                f"/cmd_vel -> MQTT | vel={vel_ms:.3f} m/s | turn={turn_degs:.1f} deg/s"
             )
 
     # ================================================================
@@ -272,10 +270,7 @@ class DeerGoMqttBridge(Node):
 
         if self.odom_count % 10 == 0:
             self.get_logger().info(
-                f"ROS2 /odom published | "
-                f"x={x:.3f}, "
-                f"y={y:.3f}, "
-                f"yaw={yaw_deg:.1f} deg"
+                f"ROS2 /odom published | x={x:.3f}, y={y:.3f}, yaw={yaw_deg:.1f} deg"
             )
 
     # ================================================================
