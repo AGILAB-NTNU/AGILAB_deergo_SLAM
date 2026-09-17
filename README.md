@@ -67,7 +67,7 @@ cd <repository_name>
 Enter the DeerGo ROS 2 workspace:
 
 ```bash
-cd deergo_ws
+cd src/deergo_ws
 ```
 
 All following commands assume that the current directory is:
