@@ -194,6 +194,17 @@ ros2 topic echo /scan
 └── log/                        # ROS 2 build and runtime logs
 ```
 
+
+---
+
+## Map Data
+
+The SLAM map data files are not included in this Git repository because they are too large.
+
+Please download the required map files from the following Google Drive link:
+
+[Download map data](https://drive.google.com/drive/folders/17emba2kduVndgk_9Y8LMmzy9cqKXp1he?usp=drive_link)
+
 ---
 
 ## Usage
@@ -542,21 +553,7 @@ This project follows the unified AGILAB development workflow.
 
 Before contributing, please refer to the [AGILAB Software Lab Guide](https://agilab-ntnu.github.io/AGILAB_Software_Lab_Guide/en/contributing/) for branching strategies and coding standards.
 
----
 
-## Citation
-
-If you use this work in your research, please cite it as follows:
-
-```bibtex
-@article{author_year_deergo,
-  author  = {Author, First and Author, Second},
-  title   = {DeerGo Autonomous Navigation},
-  journal = {Journal or Conference Name},
-  year    = {2026},
-  url     = {<repository_url>}
-}
-```
 
 ---
 
