@@ -99,3 +99,4 @@ venv.bak/
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
+src/deeergo_ws/maps/
