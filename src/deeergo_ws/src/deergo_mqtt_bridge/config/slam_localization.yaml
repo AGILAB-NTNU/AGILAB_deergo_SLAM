@@ -105,61 +105,57 @@ slam_toolbox:
     # ============================================================
     # Correlation Search
     #
-    # XY search area:
-    #   total width = 3.0 m
-    #   approximately +/-1.5 m around odom prediction
+    # Total XY search width:
+    #   2.5 m
+    #
+    # Around odom prediction:
+    #   approximately +/-1.25 m
     #
     # Correlation grid resolution:
-    #   0.10 m = 10 cm
+    #   0.05 m = 5 cm
     #
-    # NOTE:
-    #   OpenKarto coarse XY search uses approximately
-    #   2 * grid resolution, so coarse XY step is about 0.20 m.
-    #   Fine refinement then uses approximately 0.10 m.
+    # OpenKarto coarse XY step:
+    #   approximately 0.10 m
+    #
+    # Fine refinement:
+    #   approximately 0.05 m
     # ============================================================
 
-    correlation_search_space_dimension: 3.0
-    correlation_search_space_resolution: 0.10
+    correlation_search_space_dimension: 2.5
+    correlation_search_space_resolution: 0.05
     correlation_search_space_smear_deviation: 0.10
 
     # ============================================================
     # Odom / LiDAR Scan Matching Weight
     #
-    # LiDAR-dominant experimental configuration.
-    #
-    # Large variance penalties:
-    #   candidate poses may deviate farther from odom without
-    #   receiving a large score reduction.
-    #
-    # Minimum penalties close to 1:
-    #   even a candidate far from odom keeps almost all of its
-    #   LiDAR correlation score.
+    # Balanced configuration:
+    #   LiDAR can correct odometry error,
+    #   while large deviations from odom are still penalized.
     # ============================================================
 
-    distance_variance_penalty: 5.0
-    angle_variance_penalty: 6.0
+    distance_variance_penalty: 2.0
+    angle_variance_penalty: 2.0
 
-    minimum_distance_penalty: 0.99
-    minimum_angle_penalty: 0.995
+    minimum_distance_penalty: 0.85
+    minimum_angle_penalty: 0.90
 
     # ============================================================
     # Angular Search
     #
-    # Coarse search:
-    #   +/-90 deg around odom predicted heading
+    # Search range:
+    #   +/-90 deg
     #
-    # Resolution:
+    # Total:
+    #   180 deg
+    #
+    # Angular resolution:
     #   approximately 2 deg
-    #
-    # Example:
-    #   odom heading = 100 deg
-    #   candidate headings ~= 10 deg ... 190 deg
     # ============================================================
 
     fine_search_angle_offset: 0.00349
 
     coarse_search_angle_offset: 1.5708
-    coarse_angle_resolution: 0.0349
+    coarse_angle_resolution: 0.01745
 
     use_response_expansion: true
 
