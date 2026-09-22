@@ -14,7 +14,7 @@ from slam_toolbox.srv import (
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-MAP_DIR = "/home/helson/ROS2_tb4/deergo_ws/maps"
+MAP_DIR = "maps"
 MAP_NAME = "deergo_map"
 
 
