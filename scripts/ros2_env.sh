@@ -5,7 +5,9 @@
 #
 # Installs:
 #   - ROS 2 Humble Desktop / RViz2
-#   - Nav2 + SLAM Toolbox
+#   - Nav2
+#   - Cartographer 2D + ROS integration + messages + RViz plugin
+#   - Hokuyo urg_node
 #   - TF / ROS 2 message packages
 #   - ROS 2 build / dependency tools
 #   - MQTT client libraries
@@ -19,17 +21,14 @@
 #   chmod +x scripts/install_deergo_pc_humble.sh
 #   ./scripts/install_deergo_pc_humble.sh
 #
-# Optional configuration:
-#
+# Optional:
 #   DEERGO_DOMAIN_ID=13 \
 #   DEERGO_RMW=rmw_fastrtps_cpp \
 #   DEERGO_WS="$HOME/deergo_ws" \
 #   ./scripts/install_deergo_pc_humble.sh
 #
-# To avoid editing ~/.bashrc:
-#
-#   SKIP_BASHRC=1 \
-#   ./scripts/install_deergo_pc_humble.sh
+# Skip ~/.bashrc modification:
+#   SKIP_BASHRC=1 ./scripts/install_deergo_pc_humble.sh
 #
 
 set -Eeuo pipefail
@@ -82,55 +81,40 @@ trap on_error ERR
 
 
 # ================================================================
-# Permission check
+# Permission / Ubuntu checks
 # ================================================================
 
 if [[ "${EUID}" -eq 0 ]]; then
-    die "Do not run this script with sudo. Run it as a normal user; the script invokes sudo when needed."
+    die "Do not run this script with sudo. Run it as a normal user."
 fi
 
-
-# ================================================================
-# Ubuntu check
-# ================================================================
-
-[[ -r /etc/os-release ]] \
-    || die "Cannot read /etc/os-release."
+[[ -r /etc/os-release ]] || die "Cannot read /etc/os-release."
 
 # shellcheck disable=SC1091
 source /etc/os-release
 
-UBUNTU_CODENAME="${
-    UBUNTU_CODENAME:-${VERSION_CODENAME:-}
-}"
+UBUNTU_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
 
 if [[ "${ID:-}" != "ubuntu" ]]; then
     die "This script only supports Ubuntu. Detected: ${PRETTY_NAME:-unknown}."
 fi
 
 if [[ "$UBUNTU_CODENAME" != "$REQUIRED_UBUNTU_CODENAME" ]]; then
-    die "Ubuntu 22.04 (jammy) is required for ROS 2 Humble. Detected: ${PRETTY_NAME:-unknown}."
+    die "Ubuntu 22.04 (jammy) is required. Detected: ${PRETTY_NAME:-unknown}."
 fi
 
 
 # ================================================================
-# RMW check
+# RMW / ROS domain checks
 # ================================================================
 
 case "$DEERGO_RMW" in
-
     rmw_fastrtps_cpp|rmw_cyclonedds_cpp)
         ;;
-
     *)
         die "DEERGO_RMW must be rmw_fastrtps_cpp or rmw_cyclonedds_cpp."
         ;;
 esac
-
-
-# ================================================================
-# ROS Domain ID check
-# ================================================================
 
 if ! [[ "$DEERGO_DOMAIN_ID" =~ ^[0-9]+$ ]] \
     || (( DEERGO_DOMAIN_ID < 0 || DEERGO_DOMAIN_ID > 232 )); then
@@ -138,24 +122,15 @@ if ! [[ "$DEERGO_DOMAIN_ID" =~ ^[0-9]+$ ]] \
     die "DEERGO_DOMAIN_ID must be an integer from 0 to 232."
 fi
 
-
-# ================================================================
-# Environment summary
-# ================================================================
-
 log "Ubuntu check passed: ${PRETTY_NAME}"
-
 log "ROS distribution: ${ROS_DISTRO}"
-
 log "ROS_DOMAIN_ID: ${DEERGO_DOMAIN_ID}"
-
 log "RMW implementation: ${DEERGO_RMW}"
-
 log "Workspace: ${DEERGO_WS}"
 
 
 # ================================================================
-# Basic system dependencies
+# System / locale prerequisites
 # ================================================================
 
 log "Installing locale and repository prerequisites..."
@@ -169,11 +144,6 @@ sudo apt-get install -y \
     ca-certificates \
     gnupg \
     lsb-release
-
-
-# ================================================================
-# Locale
-# ================================================================
 
 sudo locale-gen en_US en_US.UTF-8
 
@@ -190,7 +160,7 @@ sudo add-apt-repository universe -y
 # ROS 2 apt repository
 # ================================================================
 
-log "Configuring the official ROS 2 apt repository..."
+log "Configuring ROS 2 apt repository..."
 
 if dpkg-query \
     -W \
@@ -199,7 +169,6 @@ if dpkg-query \
     2>/dev/null \
     | grep -q "install ok installed"
 then
-
     log "ros2-apt-source is already installed."
 
 elif grep -RqsE \
@@ -208,19 +177,15 @@ elif grep -RqsE \
     /etc/apt/sources.list.d \
     2>/dev/null
 then
-
-    log "An existing ROS 2 apt repository was detected; keeping it unchanged."
+    log "Existing ROS 2 apt repository detected."
 
 else
-
     RELEASE_JSON="$(
-        mktemp \
-        /tmp/ros-apt-source-release.XXXXXX.json
+        mktemp /tmp/ros-apt-source-release.XXXXXX.json
     )"
 
     ROS_APT_SOURCE_DEB="$(
-        mktemp \
-        /tmp/ros2-apt-source.XXXXXX.deb
+        mktemp /tmp/ros2-apt-source.XXXXXX.deb
     )"
 
     curl -fsSL \
@@ -235,52 +200,57 @@ else
     )"
 
     [[ -n "$ROS_APT_SOURCE_VERSION" ]] \
-        || die "Could not determine the latest ros2-apt-source release."
+        || die "Could not determine latest ros2-apt-source release."
 
     curl -fL \
         -o "$ROS_APT_SOURCE_DEB" \
         "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.${UBUNTU_CODENAME}_all.deb"
 
-    sudo apt-get install -y \
-        "$ROS_APT_SOURCE_DEB"
+    sudo apt-get install -y "$ROS_APT_SOURCE_DEB"
 
     rm -f \
         "$RELEASE_JSON" \
         "$ROS_APT_SOURCE_DEB"
 fi
 
-
 sudo apt-get update
 
 
 # ================================================================
-# ROS 2 packages
+# ROS 2 / Nav2 / Cartographer
 # ================================================================
 
-log "Installing ROS 2 Humble, Nav2 and SLAM packages..."
+log "Installing ROS 2 Humble, Nav2 and Cartographer..."
 
 sudo apt-get install -y \
     ros-humble-desktop \
     ros-dev-tools \
     ros-humble-navigation2 \
     ros-humble-nav2-bringup \
-    ros-humble-slam-toolbox \
+    ros-humble-nav2-map-server \
+    ros-humble-nav2-msgs \
+    ros-humble-cartographer \
+    ros-humble-cartographer-ros \
+    ros-humble-cartographer-ros-msgs \
+    ros-humble-cartographer-rviz \
     ros-humble-teleop-twist-keyboard \
     ros-humble-tf2-tools \
     ros-humble-tf2-ros \
     ros-humble-tf2-geometry-msgs \
-    ros-humble-nav2-msgs \
     ros-humble-nav-msgs \
     ros-humble-sensor-msgs \
     ros-humble-geometry-msgs \
     ros-humble-visualization-msgs \
     ros-humble-std-msgs \
+    ros-humble-std-srvs \
     ros-humble-rmw-fastrtps-cpp \
-    ros-humble-rmw-cyclonedds-cpp
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-urg-node \
+    ros-humble-diagnostic-updater
 
 
 # ================================================================
-# DeerGo MQTT / Network dependencies
+# MQTT / network
 # ================================================================
 
 log "Installing DeerGo MQTT and network tools..."
@@ -307,10 +277,10 @@ sudo apt-get install -y \
 
 
 # ================================================================
-# Data analysis tools
+# Analysis tools
 # ================================================================
 
-log "Installing Python data-analysis tools..."
+log "Installing Python analysis tools..."
 
 sudo apt-get install -y \
     python3-numpy \
@@ -325,13 +295,9 @@ sudo apt-get install -y \
 log "Initializing rosdep..."
 
 if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
-
     sudo rosdep init
-
 else
-
     log "rosdep is already initialized."
-
 fi
 
 rosdep update
@@ -352,17 +318,15 @@ mkdir -p "${DEERGO_WS}/src"
 
 if [[ "$SKIP_BASHRC" != "1" ]]; then
 
-    log "Writing an idempotent DeerGo environment block to ~/.bashrc..."
+    log "Writing DeerGo environment block to ~/.bashrc..."
 
     BASHRC="${HOME}/.bashrc"
 
     START_MARKER="# >>> deergo development environment >>>"
-
     END_MARKER="# <<< deergo development environment <<<"
 
     touch "$BASHRC"
 
-    # Remove old managed block if present.
     sed -i \
         "\|${START_MARKER}|,\|${END_MARKER}|d" \
         "$BASHRC"
@@ -377,7 +341,6 @@ export ROS_DOMAIN_ID=${DEERGO_DOMAIN_ID}
 export ROS_LOCALHOST_ONLY=0
 export RMW_IMPLEMENTATION=${DEERGO_RMW}
 
-# Source the DeerGo workspace after it has been built.
 if [ -f "${DEERGO_WS}/install/setup.bash" ]; then
     source "${DEERGO_WS}/install/setup.bash"
 fi
@@ -386,9 +349,7 @@ ${END_MARKER}
 EOF
 
 else
-
     warn "SKIP_BASHRC=1: ~/.bashrc was not modified."
-
 fi
 
 
@@ -396,7 +357,7 @@ fi
 # Verification
 # ================================================================
 
-log "Verifying ROS 2 installation..."
+log "Verifying ROS 2 / Nav2 / Cartographer installation..."
 
 # shellcheck disable=SC1091
 source "/opt/ros/${ROS_DISTRO}/setup.bash"
@@ -404,15 +365,17 @@ source "/opt/ros/${ROS_DISTRO}/setup.bash"
 command -v ros2 >/dev/null
 
 ros2 pkg prefix nav2_bringup >/dev/null
+ros2 pkg prefix nav2_map_server >/dev/null
 
-ros2 pkg prefix slam_toolbox >/dev/null
+ros2 pkg prefix cartographer_ros >/dev/null
+ros2 pkg prefix cartographer_ros_msgs >/dev/null
+ros2 pkg prefix cartographer_rviz >/dev/null
 
+ros2 pkg prefix urg_node >/dev/null
 ros2 pkg prefix rviz2 >/dev/null
 
 command -v mosquitto_pub >/dev/null
-
 command -v mosquitto_sub >/dev/null
-
 command -v nc >/dev/null
 
 
@@ -421,7 +384,6 @@ command -v nc >/dev/null
 # ================================================================
 
 cat <<EOF
-
 
 ============================================================
 DeerGo PC environment installation completed.
@@ -447,14 +409,14 @@ Build the DeerGo workspace:
   source install/setup.bash
 
 
-Configure DeerGo network and ROS 2 environment:
+Configure DeerGo network:
 
   cd "${DEERGO_WS}"
 
   source scripts/deergo_connect.sh
 
 
-Basic network checks:
+Basic checks:
 
   ip addr show enp3s0
 
@@ -463,25 +425,30 @@ Basic network checks:
   nc -zv 192.168.158.200 1883
 
 
-ROS 2 checks:
+ROS 2 / LiDAR checks:
 
   ros2 topic list
 
   ros2 topic hz /scan
 
-  ros2 topic echo /odom --once
+  ros2 topic hz /scan_sync
 
 
-DeerGo mapping:
+Cartographer checks:
 
-  ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \\
-    load_map:=false
+  ros2 pkg executables cartographer_ros
+
+  ros2 interface show cartographer_ros_msgs/srv/WriteState
 
 
-DeerGo localization:
+Cartographer map files:
 
-  ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \\
-    load_map:=true
+  Primary serialized state:
+    maps/deergo_map.pbstream
+
+  Optional occupancy export:
+    maps/deergo_map.yaml
+    maps/deergo_map.pgm
 
 
 Important:
@@ -491,13 +458,7 @@ Important:
   RMW_IMPLEMENTATION=${DEERGO_RMW}
 
   DeerGo Ethernet/network configuration is handled by:
-
     scripts/deergo_connect.sh
-
-  Serialized SLAM maps are expected under:
-
-    maps/deergo.data
-    maps/deergo.posegraph
 
 ============================================================
 
