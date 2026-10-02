@@ -12,6 +12,11 @@
   <depend>geometry_msgs</depend>
   <depend>tf2_ros</depend>
 
+
+  <exec_depend>cartographer_ros</exec_depend>
+  <exec_depend>cartographer_ros_msgs</exec_depend>
+  <exec_depend>cartographer_rviz</exec_depend>
+
   <depend>std_srvs</depend>
   <depend>nav2_msgs</depend>
 

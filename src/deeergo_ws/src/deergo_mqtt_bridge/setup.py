@@ -14,9 +14,6 @@ setup(
     ),
 
     data_files=[
-        # ========================================================
-        # ROS 2 package index
-        # ========================================================
         (
             'share/ament_index/resource_index/packages',
             [
@@ -24,9 +21,6 @@ setup(
             ]
         ),
 
-        # ========================================================
-        # package.xml
-        # ========================================================
         (
             'share/' + package_name,
             [
@@ -34,32 +28,21 @@ setup(
             ]
         ),
 
-        # ========================================================
-        # Launch files
-        #
-        # Automatically install every *.launch.py
-        # ========================================================
         (
             'share/' + package_name + '/launch',
             glob('launch/*.launch.py')
         ),
 
-        # ========================================================
-        # RViz configs
-        # ========================================================
         (
             'share/' + package_name + '/rviz',
             glob('rviz/*.rviz')
         ),
 
-        # ========================================================
-        # YAML configs
-        #
-        # Nav2 / SLAM Toolbox parameter files
-        # ========================================================
         (
             'share/' + package_name + '/config',
             glob('config/*.yaml')
+            + glob('config/*.yml')
+            + glob('config/*.lua')
         ),
     ],
 
@@ -73,7 +56,8 @@ setup(
     maintainer_email='hanson5977299@gmail.com',
 
     description=(
-        'DeerGo MQTT bridge and SLAM navigation package'
+        'DeerGo MQTT bridge, Cartographer 2D SLAM '
+        'and Nav2 navigation package'
     ),
 
     license='Apache-2.0',
@@ -89,6 +73,10 @@ setup(
             'mqtt_bridge = deergo_mqtt_bridge.mqtt_bridge:main',
             'scan_bridge = deergo_mqtt_bridge.scan_bridge:main',
             'map_manager = deergo_mqtt_bridge.map_manager:main',
+
+            # Enable after cartographer_odom_bridge.py is added:
+            # 'cartographer_odom_bridge = '
+            # 'deergo_mqtt_bridge.cartographer_odom_bridge:main',
         ],
     },
 )
