@@ -3,25 +3,22 @@
 import time
 
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import (
-    qos_profile_sensor_data,
-    QoSProfile,
-    ReliabilityPolicy,
-    DurabilityPolicy,
-    HistoryPolicy,
-)
-
-from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from rcl_interfaces.msg import Log
-
+from rclpy.node import Node
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
+from sensor_msgs.msg import LaserScan
 
 TEST_DURATION = 20.0
 
 
 class SlamScanMonitor(Node):
-
     def __init__(self):
         super().__init__("slam_scan_monitor")
 
@@ -98,10 +95,7 @@ class SlamScanMonitor(Node):
         ):
             self.queue_drop_count += 1
 
-            print(
-                f"[DROP] queue full | "
-                f"total={self.queue_drop_count}"
-            )
+            print(f"[DROP] queue full | total={self.queue_drop_count}")
 
     def check_time(self):
 
@@ -125,11 +119,7 @@ class SlamScanMonitor(Node):
         pose_hz = self.pose_count / TEST_DURATION
 
         if self.scan_count > 0:
-            drop_percent = (
-                self.queue_drop_count
-                / self.scan_count
-                * 100.0
-            )
+            drop_percent = self.queue_drop_count / self.scan_count * 100.0
         else:
             drop_percent = 0.0
 
@@ -156,12 +146,8 @@ class SlamScanMonitor(Node):
 
         if self.pose_count == 0:
             print()
-            print(
-                "NOTE: /pose produced no messages."
-            )
-            print(
-                "Check: ros2 topic list | grep pose"
-            )
+            print("NOTE: /pose produced no messages.")
+            print("Check: ros2 topic list | grep pose")
 
         print()
 

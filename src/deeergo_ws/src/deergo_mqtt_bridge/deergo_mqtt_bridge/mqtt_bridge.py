@@ -8,7 +8,6 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 
-
 BROKER_IP = "192.168.158.200"
 BROKER_PORT = 1883
 
@@ -17,7 +16,6 @@ VEL_MQTT_TOPIC = f"{TOPIC_PREFIX}/vel"
 
 
 class DeerGoMqttBridge(Node):
-
     def __init__(self):
         super().__init__("deergo_mqtt_bridge")
 
@@ -45,9 +43,7 @@ class DeerGoMqttBridge(Node):
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_disconnect = self.on_disconnect
 
-        self.get_logger().info(
-            f"Connecting MQTT broker: {BROKER_IP}:{BROKER_PORT}"
-        )
+        self.get_logger().info(f"Connecting MQTT broker: {BROKER_IP}:{BROKER_PORT}")
 
         try:
             self.mqtt_client.connect(
@@ -57,28 +53,18 @@ class DeerGoMqttBridge(Node):
             )
 
         except Exception as e:
-            self.get_logger().error(
-                f"MQTT connect failed: {e}"
-            )
+            self.get_logger().error(f"MQTT connect failed: {e}")
             raise
 
         self.mqtt_client.loop_start()
 
-        self.get_logger().info(
-            "ROS2 /cmd_vel -> MQTT velocity bridge ready"
-        )
+        self.get_logger().info("ROS2 /cmd_vel -> MQTT velocity bridge ready")
 
-        self.get_logger().info(
-            "MQTT odometry input: DISABLED"
-        )
+        self.get_logger().info("MQTT odometry input: DISABLED")
 
-        self.get_logger().info(
-            "ROS2 /odom publisher: DISABLED"
-        )
+        self.get_logger().info("ROS2 /odom publisher: DISABLED")
 
-        self.get_logger().info(
-            "odom -> base_link TF publisher: DISABLED"
-        )
+        self.get_logger().info("odom -> base_link TF publisher: DISABLED")
 
     # ================================================================
     # MQTT callbacks
@@ -92,14 +78,10 @@ class DeerGoMqttBridge(Node):
         rc,
     ):
         if rc == 0:
-            self.get_logger().info(
-                "MQTT connected"
-            )
+            self.get_logger().info("MQTT connected")
 
         else:
-            self.get_logger().error(
-                f"MQTT connection failed: rc={rc}"
-            )
+            self.get_logger().error(f"MQTT connection failed: rc={rc}")
 
     def on_disconnect(
         self,
@@ -108,14 +90,10 @@ class DeerGoMqttBridge(Node):
         rc,
     ):
         if rc == 0:
-            self.get_logger().info(
-                "MQTT disconnected normally"
-            )
+            self.get_logger().info("MQTT disconnected normally")
 
         else:
-            self.get_logger().warning(
-                f"MQTT disconnected unexpectedly: rc={rc}"
-            )
+            self.get_logger().warning(f"MQTT disconnected unexpectedly: rc={rc}")
 
     # ================================================================
     # ROS2 /cmd_vel -> MQTT vel
@@ -136,9 +114,7 @@ class DeerGoMqttBridge(Node):
 
         vel_ms = msg.linear.x
 
-        turn_degs = -math.degrees(
-            msg.angular.z
-        )
+        turn_degs = -math.degrees(msg.angular.z)
 
         payload = {
             "vel_ms": f"{vel_ms:.3f}",
@@ -157,18 +133,14 @@ class DeerGoMqttBridge(Node):
         )
 
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
-            self.get_logger().error(
-                f"MQTT vel publish failed: rc={result.rc}"
-            )
+            self.get_logger().error(f"MQTT vel publish failed: rc={result.rc}")
             return
 
         self.cmd_vel_count += 1
 
         if self.cmd_vel_count % 10 == 0:
             self.get_logger().info(
-                f"/cmd_vel -> MQTT | "
-                f"vel={vel_ms:.3f} m/s | "
-                f"turn={turn_degs:.1f} deg/s"
+                f"/cmd_vel -> MQTT | vel={vel_ms:.3f} m/s | turn={turn_degs:.1f} deg/s"
             )
 
     # ================================================================

@@ -3,12 +3,10 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-
 from sensor_msgs.msg import LaserScan
 
 
 class ScanBridge(Node):
-
     def __init__(self):
         super().__init__("scan_bridge")
 
@@ -56,42 +54,23 @@ class ScanBridge(Node):
         # Startup Information
         # ========================================================
 
-        self.get_logger().info(
-            "========================================"
-        )
+        self.get_logger().info("========================================")
 
-        self.get_logger().info(
-            "Scan Bridge started"
-        )
+        self.get_logger().info("Scan Bridge started")
 
-        self.get_logger().info(
-            "Input  : /scan"
-        )
+        self.get_logger().info("Input  : /scan")
 
-        self.get_logger().info(
-            "Output : /scan_sync"
-        )
+        self.get_logger().info("Output : /scan_sync")
 
-        self.get_logger().info(
-            "Mode   : direct pass-through"
-        )
+        self.get_logger().info("Mode   : direct pass-through")
 
-        self.get_logger().info(
-            "Timestamp correction: DISABLED"
-        )
+        self.get_logger().info("Timestamp correction: DISABLED")
 
-        self.get_logger().info(
-            "LiDAR filtering      : DISABLED"
-        )
+        self.get_logger().info("LiDAR filtering      : DISABLED")
 
-        self.get_logger().info(
-            "/scan_sync = /scan"
-        )
+        self.get_logger().info("/scan_sync = /scan")
 
-        self.get_logger().info(
-            "========================================"
-        )
-
+        self.get_logger().info("========================================")
 
     # ============================================================
     # Scan Callback
@@ -131,7 +110,6 @@ class ScanBridge(Node):
         # --------------------------------------------------------
 
         if self.frame_count % 100 == 0:
-
             self.get_logger().info(
                 f"forwarded={self.frame_count} | "
                 f"points={len(msg.ranges)} | "
@@ -143,6 +121,7 @@ class ScanBridge(Node):
 # Main
 # ================================================================
 
+
 def main(args=None):
 
     rclpy.init(args=args)
@@ -150,15 +129,12 @@ def main(args=None):
     node = ScanBridge()
 
     try:
-
         rclpy.spin(node)
 
     except KeyboardInterrupt:
-
         pass
 
     finally:
-
         node.destroy_node()
 
         if rclpy.ok():

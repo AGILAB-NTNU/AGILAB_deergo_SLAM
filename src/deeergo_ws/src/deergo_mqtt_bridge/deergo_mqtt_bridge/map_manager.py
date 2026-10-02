@@ -11,13 +11,11 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_srvs.srv import Trigger
 
-
 MAP_DIR = "maps"
 MAP_NAME = "deergo_map"
 
 
 class MapManager(Node):
-
     def __init__(self):
         super().__init__("map_manager")
 
@@ -96,33 +94,19 @@ class MapManager(Node):
         # Startup information
         # ============================================================
 
-        self.get_logger().info(
-            "========================================"
-        )
+        self.get_logger().info("========================================")
 
-        self.get_logger().info(
-            "Cartographer Map Manager ready"
-        )
+        self.get_logger().info("Cartographer Map Manager ready")
 
-        self.get_logger().info(
-            f"Occupancy map : {self.map_path}.yaml / .pgm"
-        )
+        self.get_logger().info(f"Occupancy map : {self.map_path}.yaml / .pgm")
 
-        self.get_logger().info(
-            f"PBStream      : {self.pbstream_path}"
-        )
+        self.get_logger().info(f"PBStream      : {self.pbstream_path}")
 
-        self.get_logger().info(
-            "Service       : /save_deergo_map"
-        )
+        self.get_logger().info("Service       : /save_deergo_map")
 
-        self.get_logger().info(
-            "PBStream mode : include unfinished submaps"
-        )
+        self.get_logger().info("PBStream mode : include unfinished submaps")
 
-        self.get_logger().info(
-            "========================================"
-        )
+        self.get_logger().info("========================================")
 
     # ================================================================
     # Wait future
@@ -136,7 +120,6 @@ class MapManager(Node):
         start_time = time.monotonic()
 
         while not future.done():
-
             if time.monotonic() - start_time > timeout:
                 return None
 
@@ -153,32 +136,24 @@ class MapManager(Node):
         request,
         response,
     ):
-        self.get_logger().info(
-            "Saving DeerGo Cartographer map..."
-        )
+        self.get_logger().info("Saving DeerGo Cartographer map...")
 
         # ============================================================
         # Check required services
         # ============================================================
 
-        if not self.save_map_client.wait_for_service(
-            timeout_sec=2.0
-        ):
+        if not self.save_map_client.wait_for_service(timeout_sec=2.0):
             response.success = False
             response.message = (
-                "/map_saver/save_map not available. "
-                "Start Nav2 map_saver_server first."
+                "/map_saver/save_map not available. Start Nav2 map_saver_server first."
             )
 
             return response
 
-        if not self.write_state_client.wait_for_service(
-            timeout_sec=2.0
-        ):
+        if not self.write_state_client.wait_for_service(timeout_sec=2.0):
             response.success = False
             response.message = (
-                "/write_state not available. "
-                "Cartographer node is not ready."
+                "/write_state not available. Cartographer node is not ready."
             )
 
             return response
@@ -205,13 +180,9 @@ class MapManager(Node):
         save_request.free_thresh = 0.25
         save_request.occupied_thresh = 0.65
 
-        self.get_logger().info(
-            f"Saving occupancy map: {self.map_path}"
-        )
+        self.get_logger().info(f"Saving occupancy map: {self.map_path}")
 
-        save_future = self.save_map_client.call_async(
-            save_request
-        )
+        save_future = self.save_map_client.call_async(save_request)
 
         save_result = self.wait_future(
             save_future,
@@ -219,34 +190,22 @@ class MapManager(Node):
         )
 
         if save_result is None:
-
-            self.get_logger().error(
-                "Occupancy map save timeout"
-            )
+            self.get_logger().error("Occupancy map save timeout")
 
             response.success = False
-            response.message = (
-                "Occupancy map save timeout"
-            )
+            response.message = "Occupancy map save timeout"
 
             return response
 
         if not save_result.result:
-
-            self.get_logger().error(
-                "Occupancy map save failed"
-            )
+            self.get_logger().error("Occupancy map save failed")
 
             response.success = False
-            response.message = (
-                "Occupancy map save failed"
-            )
+            response.message = "Occupancy map save failed"
 
             return response
 
-        self.get_logger().info(
-            "Occupancy map saved"
-        )
+        self.get_logger().info("Occupancy map saved")
 
         # ============================================================
         # 2. Save Cartographer state
@@ -266,13 +225,9 @@ class MapManager(Node):
         write_request.filename = self.pbstream_path
         write_request.include_unfinished_submaps = True
 
-        self.get_logger().info(
-            f"Writing PBStream: {self.pbstream_path}"
-        )
+        self.get_logger().info(f"Writing PBStream: {self.pbstream_path}")
 
-        write_future = self.write_state_client.call_async(
-            write_request
-        )
+        write_future = self.write_state_client.call_async(write_request)
 
         write_result = self.wait_future(
             write_future,
@@ -280,23 +235,16 @@ class MapManager(Node):
         )
 
         if write_result is None:
-
-            self.get_logger().error(
-                "PBStream write timeout"
-            )
+            self.get_logger().error("PBStream write timeout")
 
             response.success = False
-            response.message = (
-                "Occupancy map saved, "
-                "but PBStream write timed out"
-            )
+            response.message = "Occupancy map saved, but PBStream write timed out"
 
             return response
 
         # Cartographer services use StatusResponse.
         # gRPC status code 0 = OK.
         if write_result.status.code != 0:
-
             self.get_logger().error(
                 "PBStream write failed: "
                 f"code={write_result.status.code}, "
@@ -312,9 +260,7 @@ class MapManager(Node):
 
             return response
 
-        self.get_logger().info(
-            "PBStream saved"
-        )
+        self.get_logger().info("PBStream saved")
 
         # ============================================================
         # Success
@@ -322,9 +268,7 @@ class MapManager(Node):
 
         response.success = True
         response.message = (
-            "DeerGo map saved: "
-            f"{self.map_path}.yaml/.pgm + "
-            f"{self.pbstream_path}"
+            f"DeerGo map saved: {self.map_path}.yaml/.pgm + {self.pbstream_path}"
         )
 
         return response
@@ -336,22 +280,17 @@ def main(args=None):
 
     node = MapManager()
 
-    executor = MultiThreadedExecutor(
-        num_threads=4
-    )
+    executor = MultiThreadedExecutor(num_threads=4)
 
     executor.add_node(node)
 
     try:
-
         executor.spin()
 
     except KeyboardInterrupt:
-
         pass
 
     finally:
-
         executor.shutdown()
 
         node.destroy_node()
