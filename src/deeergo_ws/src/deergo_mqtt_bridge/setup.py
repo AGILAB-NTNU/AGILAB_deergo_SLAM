@@ -74,9 +74,8 @@ setup(
             'scan_bridge = deergo_mqtt_bridge.scan_bridge:main',
             'map_manager = deergo_mqtt_bridge.map_manager:main',
 
-            # Enable after cartographer_odom_bridge.py is added:
-            # 'cartographer_odom_bridge = '
-            # 'deergo_mqtt_bridge.cartographer_odom_bridge:main',
+            'cartographer_odom_bridge = '
+            'deergo_mqtt_bridge.cartographer_odom_bridge:main',
         ],
     },
 )
