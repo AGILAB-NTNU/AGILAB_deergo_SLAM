@@ -18,9 +18,14 @@ echo "[DeerGo] Workspace : ${WS_DIR}"
 
 echo "[DeerGo] Configuring enp3s0..."
 
-sudo ip addr flush dev enp3s0
-sudo ip addr add 192.168.158.100/24 dev enp3s0
-sudo ip link set enp3s0 up
+# Re-sourcing must not remove addresses from an interface already used by DDS.
+if ! ip -4 -o addr show dev enp3s0 | awk '{print $4}' | \
+    grep -Fxq '192.168.158.100/24'; then
+    sudo ip addr add 192.168.158.100/24 dev enp3s0
+fi
+if ! ip -o link show dev enp3s0 | grep -Eq '<([^>]*,)?UP(,|>)'; then
+    sudo ip link set enp3s0 up
+fi
 
 
 # ============================================================
@@ -65,13 +70,23 @@ fi
 LIDAR_DEVICE="/dev/serial/by-id/usb-Hokuyo_Data_Flex_for_USB_URG-Series_USB_Driver-if00"
 
 # LiDAR TF frame
-LIDAR_FRAME="laser_link"
+LIDAR_FRAME="laser"
 
 # +/- 120 degrees
 LIDAR_ANGLE_MIN="-2.09439510239"
 LIDAR_ANGLE_MAX="2.09439510239"
 
 echo "[DeerGo] Checking Hokuyo LiDAR..."
+
+deergo_scan_is_arriving() {
+    # A process or cached topic name does not prove the driver is publishing.
+    timeout --signal=INT --kill-after=2s 10s \
+        ros2 topic echo /scan sensor_msgs/msg/LaserScan \
+        --once --field header --qos-reliability best_effort --no-daemon \
+        > /tmp/deergo_scan_check.log 2>&1
+}
+
+LIDAR_READY=false
 
 if [ ! -e "${LIDAR_DEVICE}" ]; then
 
@@ -87,11 +102,44 @@ else
     # Prevent duplicate urg_node_driver processes
     # --------------------------------------------------------
 
-    if pgrep -f "urg_node_driver" > /dev/null; then
+    LIDAR_PIDS="$(pgrep -x urg_node_driver || true)"
+    LIDAR_START_ALLOWED=true
 
-        echo "[DeerGo] urg_node_driver is already running."
+    if [ -n "${LIDAR_PIDS}" ]; then
 
-    else
+        echo "[DeerGo] Driver exists; checking real /scan data (up to 10 seconds)..."
+
+        if deergo_scan_is_arriving; then
+            LIDAR_READY=true
+            echo "[DeerGo] /scan is receiving LaserScan messages."
+        else
+            echo "[DeerGo] Driver is alive but /scan is unavailable; restarting this LiDAR."
+            for LIDAR_PID in ${LIDAR_PIDS}; do
+                # Stop only this user's driver for the configured serial device.
+                if [ -O "/proc/${LIDAR_PID}" ] && \
+                    tr '\0' '\n' < "/proc/${LIDAR_PID}/cmdline" | \
+                    grep -Fxq "serial_port:=${LIDAR_DEVICE}"; then
+                    kill -INT "${LIDAR_PID}"
+                else
+                    echo "[DeerGo] WARNING: Driver ${LIDAR_PID} was not started for this device; leaving it running."
+                    LIDAR_START_ALLOWED=false
+                fi
+            done
+
+            # Give the existing driver time to release its serial device.
+            for LIDAR_WAIT in {1..50}; do
+                pgrep -x urg_node_driver > /dev/null || break
+                sleep 0.1
+            done
+            if pgrep -x urg_node_driver > /dev/null; then
+                echo "[DeerGo] WARNING: Driver still exists; not starting a duplicate."
+                LIDAR_START_ALLOWED=false
+            fi
+        fi
+
+    fi
+
+    if [ "${LIDAR_READY}" = false ] && [ "${LIDAR_START_ALLOWED}" = true ]; then
 
         echo "[DeerGo] Starting Hokuyo LiDAR..."
         echo "[DeerGo] Frame   : ${LIDAR_FRAME}"
@@ -106,22 +154,22 @@ else
             -p angle_max:="${LIDAR_ANGLE_MAX}" \
             > /tmp/deergo_hokuyo.log 2>&1 &
 
-        sleep 2
-
         # ----------------------------------------------------
-        # Verify LiDAR process
+        # Verify real scan data, including startup/discovery time
         # ----------------------------------------------------
 
-        if pgrep -f "urg_node_driver" > /dev/null; then
+        if deergo_scan_is_arriving; then
 
-            echo "[DeerGo] Hokuyo LiDAR started."
+            LIDAR_READY=true
+            echo "[DeerGo] Hokuyo LiDAR started; /scan is receiving data."
             echo "[DeerGo] Log: /tmp/deergo_hokuyo.log"
 
         else
 
-            echo "[DeerGo] WARNING: Hokuyo LiDAR failed to start."
+            echo "[DeerGo] WARNING: No /scan message arrived within 10 seconds."
             echo "[DeerGo] Check log:"
             echo "         cat /tmp/deergo_hokuyo.log"
+            echo "         cat /tmp/deergo_scan_check.log"
 
         fi
 
@@ -136,8 +184,16 @@ fi
 
 echo
 echo "============================================================"
-echo "[DeerGo] Ready"
+if [ "${LIDAR_READY}" = true ]; then
+    echo "[DeerGo] Ready (/scan verified)"
+else
+    echo "[DeerGo] WARNING: Environment loaded, but LiDAR is not ready."
+fi
 echo "============================================================"
+
+if [ "${LIDAR_READY}" != true ]; then
+    return 1 2>/dev/null || exit 1
+fi
 
 echo
 echo "Repository:"
