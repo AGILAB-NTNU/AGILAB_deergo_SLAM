@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    start_mqtt = LaunchConfiguration("start_mqtt")
+
+    declare_start_mqtt = DeclareLaunchArgument(
+        "start_mqtt",
+        default_value="true",
+        description="Start the MQTT velocity bridge; disable for LiDAR-only tests without the robot",
+    )
     # ============================================================
     # MQTT Bridge
     # ============================================================
@@ -14,6 +24,7 @@ def generate_launch_description():
         executable="mqtt_bridge",
         name="deergo_mqtt_bridge",
         output="screen",
+        condition=IfCondition(start_mqtt),
     )
 
     # ============================================================
@@ -30,7 +41,9 @@ def generate_launch_description():
 
     # ============================================================
     # Static TF
-    # base_link -> laser_link
+    # base_link -> laser (matches Hokuyo LaserScan.header.frame_id)
+    # Roll pi corrects the observed left/right mirror in the mounted LiDAR.
+    # The laser X axis stays forward; its Y and Z axes are reversed.
     # ============================================================
 
     static_tf = Node(
@@ -50,16 +63,17 @@ def generate_launch_description():
             "--pitch",
             "0",
             "--roll",
-            "0",
+            "3.141592653589793",
             "--frame-id",
             "base_link",
             "--child-frame-id",
-            "laser_link",
+            "laser",
         ],
     )
 
     return LaunchDescription(
         [
+            declare_start_mqtt,
             mqtt_bridge,
             scan_bridge,
             static_tf,

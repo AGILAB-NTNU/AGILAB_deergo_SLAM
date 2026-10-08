@@ -15,17 +15,19 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
+
 # ================================================================
-# Check serialized map
+# Validate Cartographer PBStream
 # ================================================================
 
-
-def validate_serialized_map(
+def validate_pbstream(
     context,
     load_map,
-    serialized_map,
+    pbstream_file,
 ):
-    load_map_value = context.perform_substitution(load_map).strip().lower()
+    load_map_value = context.perform_substitution(
+        load_map
+    ).strip().lower()
 
     if load_map_value not in (
         "true",
@@ -35,20 +37,10 @@ def validate_serialized_map(
     ):
         return []
 
-    data_file = serialized_map + ".data"
-    posegraph_file = serialized_map + ".posegraph"
-
-    missing_files = []
-
-    if not os.path.isfile(data_file):
-        missing_files.append(data_file)
-
-    if not os.path.isfile(posegraph_file):
-        missing_files.append(posegraph_file)
-
-    if missing_files:
+    if not os.path.isfile(pbstream_file):
         raise RuntimeError(
-            "\nSerialized map file missing:\n" + "\n".join(missing_files)
+            "\nCartographer PBStream file missing:\n"
+            f"{pbstream_file}"
         )
 
     return [
@@ -56,11 +48,10 @@ def validate_serialized_map(
             msg=(
                 "\n"
                 "============================================\n"
-                "Loading serialized SLAM map\n"
+                "Loading Cartographer serialized state\n"
                 "============================================\n"
-                f"DATA      : {data_file}\n"
-                f"POSEGRAPH : {posegraph_file}\n"
-                "Mode      : localization\n"
+                f"PBSTREAM : {pbstream_file}\n"
+                "Mode     : pure localization\n"
                 "============================================"
             )
         )
@@ -71,15 +62,15 @@ def validate_serialized_map(
 # Launch
 # ================================================================
 
-
 def generate_launch_description():
+
     # ============================================================
     # Package paths
     # ============================================================
 
-    deergo_share = get_package_share_directory("deergo_mqtt_bridge")
-
-    slam_toolbox_share = get_package_share_directory("slam_toolbox")
+    deergo_share = get_package_share_directory(
+        "deergo_mqtt_bridge"
+    )
 
     # ============================================================
     # DeerGo launch files
@@ -98,41 +89,21 @@ def generate_launch_description():
     )
 
     # ============================================================
-    # SLAM Toolbox launch files
-    # ============================================================
-
-    mapping_launch = os.path.join(
-        slam_toolbox_share,
-        "launch",
-        "online_async_launch.py",
-    )
-
-    localization_launch = os.path.join(
-        slam_toolbox_share,
-        "launch",
-        "localization_launch.py",
-    )
-
-    # ============================================================
-    # SLAM Toolbox YAML
+    # Cartographer configuration
     #
-    # All SLAM tuning is maintained only in:
-    #
-    # config/slam_mapping.yaml
-    # config/slam_localization.yaml
+    # IMPORTANT:
+    # Cartographer algorithm parameters are native LUA parameters.
+    # They are intentionally kept outside this launch file.
     # ============================================================
 
-    mapping_params_file = os.path.join(
+    cartographer_config_dir = os.path.join(
         deergo_share,
         "config",
-        "slam_mapping.yaml",
     )
 
-    localization_params_file = os.path.join(
-        deergo_share,
-        "config",
-        "slam_localization.yaml",
-    )
+    mapping_config = "cartographer_mapping.lua"
+
+    localization_config = "cartographer_localization.lua"
 
     # ============================================================
     # RViz
@@ -141,83 +112,219 @@ def generate_launch_description():
     rviz_config = os.path.join(
         deergo_share,
         "rviz",
-        "deergo_slam.rviz",
+        "deergo_cartographer.rviz",
     )
 
     # ============================================================
-    # Serialized map
+    # Cartographer serialized state
     #
-    # Must match map_file_name in:
-    # config/slam_localization.yaml
+    # Must match map_manager.py:
+    #   MAP_DIR  = "maps"
+    #   MAP_NAME = "deergo_map"
     # ============================================================
 
-    serialized_map = os.path.expanduser("maps/deergo")
+    pbstream_file = os.path.abspath(
+        os.path.expanduser(
+            "maps/deergo_map.pbstream"
+        )
+    )
 
     # ============================================================
-    # load_map
-    #
-    # false -> Mapping
-    # true  -> Localization
+    # Launch arguments
     # ============================================================
 
-    load_map = LaunchConfiguration("load_map")
+    load_map = LaunchConfiguration(
+        "load_map"
+    )
+
+    start_nav2 = LaunchConfiguration(
+        "start_nav2"
+    )
+
+    start_mqtt = LaunchConfiguration("start_mqtt")
+
+    use_sim_time = LaunchConfiguration(
+        "use_sim_time"
+    )
 
     declare_load_map = DeclareLaunchArgument(
         "load_map",
         default_value="false",
         description=(
-            "false = mapping, true = load serialized map and use localization mode"
+            "false = Cartographer mapping, "
+            "true = load PBStream and use pure localization"
         ),
     )
 
+    declare_start_nav2 = DeclareLaunchArgument(
+        "start_nav2",
+        default_value="false",
+        description=(
+            "Start Nav2 together with Cartographer. "
+            "Keep false for the first LiDAR-only Cartographer test."
+        ),
+    )
+
+    declare_use_sim_time = DeclareLaunchArgument(
+        "use_sim_time",
+        default_value="false",
+        description="Use simulation clock",
+    )
+
+    declare_start_mqtt = DeclareLaunchArgument(
+        "start_mqtt",
+        default_value="true",
+        description="Start the MQTT velocity bridge; disable when the robot is disconnected",
+    )
+
     validate_map = OpaqueFunction(
-        function=validate_serialized_map,
+        function=validate_pbstream,
         args=[
             load_map,
-            serialized_map,
+            pbstream_file,
         ],
     )
 
     # ============================================================
     # DeerGo communication
+    #
+    # Expected to start:
+    #   mqtt_bridge
+    #   scan_bridge
+    #   base_link -> laser frame static TF
+    #   map_manager (if included in your current node launch)
+    #
+    # mqtt_bridge MUST NOT publish wheel /odom or odom->base_link.
     # ============================================================
 
     deergo_nodes = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(deergo_nodes_launch)
+        PythonLaunchDescriptionSource(
+            deergo_nodes_launch
+        ),
+        launch_arguments={"start_mqtt": start_mqtt}.items(),
     )
 
     # ============================================================
-    # SLAM Mapping
+    # Cartographer Mapping
+    #
+    # Input:
+    #   Cartographer default "scan" topic
+    #       remapped to /scan_sync
+    #
+    # Output TF:
+    #   map -> odom -> base_link
     # ============================================================
 
-    slam_mapping = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(mapping_launch),
-        launch_arguments={
-            "use_sim_time": "false",
-            "slam_params_file": mapping_params_file,
-        }.items(),
-        condition=UnlessCondition(load_map),
+    cartographer_mapping = Node(
+        package="cartographer_ros",
+        executable="cartographer_node",
+        name="cartographer_node",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+            }
+        ],
+        arguments=[
+            "-configuration_directory",
+            cartographer_config_dir,
+            "-configuration_basename",
+            mapping_config,
+        ],
+        remappings=[
+            ("scan", "/scan_sync"),
+        ],
+        condition=UnlessCondition(
+            load_map
+        ),
     )
 
     # ============================================================
-    # SLAM Localization
+    # Cartographer Pure Localization
+    #
+    # Loads:
+    #   maps/deergo_map.pbstream
     # ============================================================
 
-    slam_localization = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(localization_launch),
-        launch_arguments={
-            "use_sim_time": "false",
-            "slam_params_file": localization_params_file,
-        }.items(),
-        condition=IfCondition(load_map),
+    cartographer_localization = Node(
+        package="cartographer_ros",
+        executable="cartographer_node",
+        name="cartographer_node",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+            }
+        ],
+        arguments=[
+            "-configuration_directory",
+            cartographer_config_dir,
+            "-configuration_basename",
+            localization_config,
+            "-load_state_filename",
+            pbstream_file,
+            "-load_frozen_state",
+            "true",
+        ],
+        remappings=[
+            ("scan", "/scan_sync"),
+        ],
+        condition=IfCondition(
+            load_map
+        ),
+    )
+
+    # ============================================================
+    # Occupancy Grid
+    #
+    # Cartographer internally stores submaps.
+    # This node converts them to nav_msgs/OccupancyGrid on /map.
+    # ============================================================
+
+    occupancy_grid = Node(
+        package="cartographer_ros",
+        executable="cartographer_occupancy_grid_node",
+        name="cartographer_occupancy_grid_node",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+            }
+        ],
+        arguments=[
+            "-resolution",
+            "0.05",
+            "-publish_period_sec",
+            "1.0",
+        ],
+    )
+
+    # ============================================================
+    # Cartographer TF -> /odom (no TF broadcasting)
+    # ============================================================
+
+    cartographer_odom_bridge = Node(
+        package="deergo_mqtt_bridge",
+        executable="cartographer_odom_bridge",
+        name="cartographer_odom_bridge",
+        output="screen",
+        parameters=[{"use_sim_time": use_sim_time}],
     )
 
     # ============================================================
     # Nav2
+    #
+    # Disabled by default until Cartographer pose/TF is verified
+    # and the Cartographer TF -> nav_msgs/Odometry bridge is verified.
     # ============================================================
 
     navigation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(navigation_launch)
+        PythonLaunchDescriptionSource(
+            navigation_launch
+        ),
+        condition=IfCondition(
+            start_nav2
+        ),
     )
 
     # ============================================================
@@ -235,7 +342,7 @@ def generate_launch_description():
         ],
         parameters=[
             {
-                "use_sim_time": False,
+                "use_sim_time": use_sim_time,
             }
         ],
     )
@@ -247,10 +354,15 @@ def generate_launch_description():
     return LaunchDescription(
         [
             declare_load_map,
+            declare_start_nav2,
+            declare_start_mqtt,
+            declare_use_sim_time,
             validate_map,
             deergo_nodes,
-            slam_mapping,
-            slam_localization,
+            cartographer_mapping,
+            cartographer_localization,
+            occupancy_grid,
+            cartographer_odom_bridge,
             navigation,
             rviz,
         ]
