@@ -68,11 +68,12 @@ fi
 # ============================================================
 
 LIDAR_DEVICE="/dev/serial/by-id/usb-Hokuyo_Data_Flex_for_USB_URG-Series_USB_Driver-if00"
+LIDAR_BAUD="115200"
 
 # LiDAR TF frame
 LIDAR_FRAME="laser"
 
-# +/- 120 degrees
+# UTM-30LX: use only the front +/- 120 degrees (240 degrees total).
 LIDAR_ANGLE_MIN="-2.09439510239"
 LIDAR_ANGLE_MAX="2.09439510239"
 
@@ -112,6 +113,7 @@ else
         if deergo_scan_is_arriving; then
             LIDAR_READY=true
             echo "[DeerGo] /scan is receiving LaserScan messages."
+            echo "[DeerGo] Reusing the running driver; stop it first to apply this script's +/- 120 deg settings."
         else
             echo "[DeerGo] Driver is alive but /scan is unavailable; restarting this LiDAR."
             for LIDAR_PID in ${LIDAR_PIDS}; do
@@ -142,13 +144,14 @@ else
     if [ "${LIDAR_READY}" = false ] && [ "${LIDAR_START_ALLOWED}" = true ]; then
 
         echo "[DeerGo] Starting Hokuyo LiDAR..."
+        echo "[DeerGo] Baud    : ${LIDAR_BAUD}"
         echo "[DeerGo] Frame   : ${LIDAR_FRAME}"
         echo "[DeerGo] Scan FOV: -120 deg ~ +120 deg"
 
         nohup ros2 run urg_node urg_node_driver \
             --ros-args \
-            --params-file /opt/ros/humble/share/urg_node/launch/urg_node_serial.yaml \
             -p serial_port:="${LIDAR_DEVICE}" \
+            -p serial_baud:="${LIDAR_BAUD}" \
             -p laser_frame_id:="${LIDAR_FRAME}" \
             -p angle_min:="${LIDAR_ANGLE_MIN}" \
             -p angle_max:="${LIDAR_ANGLE_MAX}" \
@@ -215,6 +218,7 @@ ip addr show enp3s0 | grep "inet "
 echo
 echo "LiDAR:"
 echo "  device    = ${LIDAR_DEVICE}"
+echo "  baud      = ${LIDAR_BAUD}"
 echo "  frame     = ${LIDAR_FRAME}"
 echo "  angle_min = -120 deg"
 echo "  angle_max = +120 deg"

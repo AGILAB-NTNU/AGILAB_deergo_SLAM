@@ -13,7 +13,7 @@ def generate_launch_description():
     declare_start_mqtt = DeclareLaunchArgument(
         "start_mqtt",
         default_value="true",
-        description="Start the MQTT velocity bridge; disable for LiDAR-only tests without the robot",
+        description="Start the MQTT velocity bridge",
     )
     # ============================================================
     # MQTT Bridge
@@ -63,7 +63,8 @@ def generate_launch_description():
             "--pitch",
             "0",
             "--roll",
-            "3.141592653589793",
+            "0",
+            # "3.141592653589793",
             "--frame-id",
             "base_link",
             "--child-frame-id",
