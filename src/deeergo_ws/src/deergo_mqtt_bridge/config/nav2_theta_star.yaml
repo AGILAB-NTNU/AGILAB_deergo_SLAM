@@ -429,7 +429,8 @@ local_costmap:
 
         publish_voxel_map: True
 
-        origin_z: 0.0
+        # Keep z=0 scans inside the grid despite roll=pi TF rounding.
+        origin_z: -0.001
 
         z_resolution: 0.05
 
@@ -444,6 +445,8 @@ local_costmap:
         scan:
 
           topic: /scan_sync  # full scan: static + dynamic obstacles
+
+          min_obstacle_height: -0.001  # 1 mm tolerance for TF rounding at z=0
 
           max_obstacle_height: 2.0
 
@@ -501,11 +504,15 @@ global_costmap:
 
         enabled: True
 
+        min_obstacle_height: -0.001  # Match the scan source's height tolerance
+
         observation_sources: scan
 
         scan:
 
           topic: /scan_sync  # full scan: static + dynamic obstacles
+
+          min_obstacle_height: -0.001  # 1 mm tolerance for TF rounding at z=0
 
           max_obstacle_height: 2.0
 
