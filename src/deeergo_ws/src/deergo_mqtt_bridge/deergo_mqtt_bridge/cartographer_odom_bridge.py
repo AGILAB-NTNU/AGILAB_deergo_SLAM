@@ -23,9 +23,7 @@ class CartographerOdomBridge(Node):
 
     def publish_odometry(self):
         try:
-            transform = self.tf_buffer.lookup_transform(
-                "odom", "base_link", Time()
-            )
+            transform = self.tf_buffer.lookup_transform("odom", "base_link", Time())
         except TransformException:
             # Cartographer may not have received its first scan yet.
             return

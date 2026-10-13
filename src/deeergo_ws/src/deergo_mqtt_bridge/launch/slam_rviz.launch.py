@@ -15,19 +15,17 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-
 # ================================================================
 # Validate Cartographer PBStream
 # ================================================================
+
 
 def validate_pbstream(
     context,
     load_map,
     pbstream_file,
 ):
-    load_map_value = context.perform_substitution(
-        load_map
-    ).strip().lower()
+    load_map_value = context.perform_substitution(load_map).strip().lower()
 
     if load_map_value not in (
         "true",
@@ -38,10 +36,7 @@ def validate_pbstream(
         return []
 
     if not os.path.isfile(pbstream_file):
-        raise RuntimeError(
-            "\nCartographer PBStream file missing:\n"
-            f"{pbstream_file}"
-        )
+        raise RuntimeError(f"\nCartographer PBStream file missing:\n{pbstream_file}")
 
     return [
         LogInfo(
@@ -62,15 +57,14 @@ def validate_pbstream(
 # Launch
 # ================================================================
 
+
 def generate_launch_description():
 
     # ============================================================
     # Package paths
     # ============================================================
 
-    deergo_share = get_package_share_directory(
-        "deergo_mqtt_bridge"
-    )
+    deergo_share = get_package_share_directory("deergo_mqtt_bridge")
 
     # ============================================================
     # DeerGo launch files
@@ -123,29 +117,19 @@ def generate_launch_description():
     #   MAP_NAME = "deergo_map"
     # ============================================================
 
-    pbstream_file = os.path.abspath(
-        os.path.expanduser(
-            "maps/deergo_map.pbstream"
-        )
-    )
+    pbstream_file = os.path.abspath(os.path.expanduser("maps/deergo_map.pbstream"))
 
     # ============================================================
     # Launch arguments
     # ============================================================
 
-    load_map = LaunchConfiguration(
-        "load_map"
-    )
+    load_map = LaunchConfiguration("load_map")
 
-    start_nav2 = LaunchConfiguration(
-        "start_nav2"
-    )
+    start_nav2 = LaunchConfiguration("start_nav2")
 
     start_mqtt = LaunchConfiguration("start_mqtt")
 
-    use_sim_time = LaunchConfiguration(
-        "use_sim_time"
-    )
+    use_sim_time = LaunchConfiguration("use_sim_time")
 
     declare_load_map = DeclareLaunchArgument(
         "load_map",
@@ -198,9 +182,7 @@ def generate_launch_description():
     # ============================================================
 
     deergo_nodes = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            deergo_nodes_launch
-        ),
+        PythonLaunchDescriptionSource(deergo_nodes_launch),
         launch_arguments={"start_mqtt": start_mqtt}.items(),
     )
 
@@ -234,9 +216,7 @@ def generate_launch_description():
         remappings=[
             ("scan", "/scan_sync"),
         ],
-        condition=UnlessCondition(
-            load_map
-        ),
+        condition=UnlessCondition(load_map),
     )
 
     # ============================================================
@@ -269,9 +249,7 @@ def generate_launch_description():
         remappings=[
             ("scan", "/scan_sync"),
         ],
-        condition=IfCondition(
-            load_map
-        ),
+        condition=IfCondition(load_map),
     )
 
     # ============================================================
@@ -319,12 +297,8 @@ def generate_launch_description():
     # ============================================================
 
     navigation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            navigation_launch
-        ),
-        condition=IfCondition(
-            start_nav2
-        ),
+        PythonLaunchDescriptionSource(navigation_launch),
+        condition=IfCondition(start_nav2),
     )
 
     # ============================================================
