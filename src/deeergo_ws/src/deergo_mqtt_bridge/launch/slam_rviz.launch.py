@@ -174,7 +174,7 @@ def generate_launch_description():
     declare_start_mqtt = DeclareLaunchArgument(
         "start_mqtt",
         default_value="true",
-        description="Start the MQTT velocity bridge; disable when the robot is disconnected",
+        description="Start the MQTT velocity bridge",
     )
 
     validate_map = OpaqueFunction(
