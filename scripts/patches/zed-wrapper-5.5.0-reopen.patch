@@ -1,0 +1,15 @@
+diff --git a/zed_components/src/zed_camera/src/zed_camera_component_main.cpp b/zed_components/src/zed_camera/src/zed_camera_component_main.cpp
+index be0849d..eba451a 100644
+--- a/zed_components/src/zed_camera/src/zed_camera_component_main.cpp
++++ b/zed_components/src/zed_camera/src/zed_camera_component_main.cpp
+@@ -3076,6 +3076,10 @@ bool ZedCamera::startCamera()
+       break;
+     }
+
++    // Reset SDK capture state before retrying after an incomplete USB open.
++    // Otherwise subsequent opens may return INVALID_FUNCTION_CALL forever.
++    mZed->close();
++
+ #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 51
+     if (mConnStatus == sl::ERROR_CODE::DRIVER_FAILURE) {
+       RCLCPP_ERROR_STREAM(

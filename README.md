@@ -39,6 +39,64 @@ Cartographer owns both `map -> odom` and `odom -> base_link`.
 The odometry bridge publishes `/odom` messages without broadcasting TF.
 Wheel/MQTT odometry and IMU data are not used for state estimation.
 
+### ROS 2 System Architecture
+
+```mermaid
+flowchart TB
+    subgraph PERCEPTION["LiDAR, Mapping and Localization"]
+        LIDAR["Hokuyo Driver<br/>/urg_node"]
+        SCAN["Scan Bridge<br/>/scan_bridge"]
+        CARTO["Cartographer<br/>/cartographer_node"]
+        MAP["Occupancy Grid<br/>/cartographer_occupancy_grid_node"]
+        ODOM["Odometry Bridge<br/>/cartographer_odom_bridge"]
+
+        LIDAR -->|"/scan"| SCAN
+        SCAN -->|"/scan_sync"| CARTO
+        CARTO -->|"/submap_list"| MAP
+        CARTO -->|"/tf"| ODOM
+    end
+
+    subgraph NAVIGATION["Navigation: start_nav2:=true"]
+        NAV2["Nav2<br/>/bt_navigator<br/>/planner_server<br/>/controller_server"]
+        SMOOTHER["Velocity Smoother<br/>/velocity_smoother"]
+        NAV2 -->|"/cmd_vel_nav"| SMOOTHER
+    end
+
+    SCAN -->|"/scan_sync"| NAV2
+    MAP -->|"/map"| NAV2
+    CARTO -->|"/tf"| NAV2
+    ODOM -->|"/odom"| NAV2
+
+    RVIZ["RViz<br/>/rviz2"]
+    MAP -->|"/map"| RVIZ
+    RVIZ -->|"/goal_pose"| NAV2
+    NAV2 -->|"/plan and /local_plan"| RVIZ
+
+    subgraph DRIVE["Robot Control: start_mqtt:=true"]
+        MQTT["MQTT Bridge<br/>/deergo_mqtt_bridge"]
+        ROBOT["DeerGo Base"]
+        MQTT -->|"MQTT via broker<br/>Puffer/DeerGo_001/vel"| ROBOT
+    end
+    SMOOTHER -->|"/cmd_vel"| MQTT
+
+    subgraph CAMERA["Independent Camera: camera:=true"]
+        ZED["ZED Camera<br/>/zed/zed_node"]
+        VIEWER["Image Viewer<br/>/zed/zed_image_viewer"]
+        ZED -->|"/zed/zed_node/rgb/color/rect/image"| VIEWER
+    end
+
+    classDef nav fill:#eff6ff,stroke:#2563eb,color:#111827;
+    classDef camera fill:#ecfdf5,stroke:#059669,color:#111827;
+    classDef hardware fill:#f3f4f6,stroke:#6b7280,color:#111827;
+    class NAV2,SMOOTHER nav;
+    class ZED,VIEWER camera;
+    class ROBOT hardware;
+```
+
+---
+
+### LiDAR Navigation Pipeline
+
 ```mermaid
 flowchart TD
     LiDAR[LiDAR / urg_node] -->|/scan| ScanBridge[scan_bridge]
@@ -162,15 +220,9 @@ the LiDAR, SLAM, and diagnostic terminals.
 For this setup, set `export ROS_DOMAIN_ID=13` in each additional terminal after
 sourcing the ROS and workspace environments.
 
----
-
-#### 4. Install pre-commit hooks
-
-Optional but recommended:
-
-```bash
-pre-commit install
-```
+The Hokuyo driver starts with `skip=3`, giving approximately 10 Hz output
+from the current 40 Hz sensor. Stop the existing driver before sourcing
+the script to apply changed scan settings; a healthy running driver is reused.
 
 ---
 
@@ -235,21 +287,6 @@ agilab_deerGO_SLAM/
 └── README_zh.md
 ```
 
-
----
-
-## Map Data
-
-The SLAM map data files are not included in this Git repository because they are too large.
-
-Please download the required map files from the following Google Drive link:
-
-[Download map data](https://drive.google.com/drive/folders/17emba2kduVndgk_9Y8LMmzy9cqKXp1he?usp=drive_link)
-
-Cartographer pure localization requires `maps/deergo_map.pbstream`.
-An occupancy export (`.yaml` / `.pgm`) alone cannot be loaded as Cartographer
-serialized state. Check the downloaded files before using `load_map:=true`.
-
 ---
 
 ## Usage
@@ -274,6 +311,7 @@ cartographer_node (cartographer_mapping.lua)
 cartographer_occupancy_grid_node
 cartographer_odom_bridge
 RViz2
+ZED camera + independent OpenCV image window (only with camera:=true, when installed)
 ```
 
 The Hokuyo driver must be running separately and publishing `/scan`; the SLAM
@@ -296,6 +334,38 @@ driver. If `/scan` stops arriving after a network change, check the driver
 before enabling Nav2; a running driver process alone does not confirm that
 scan messages are arriving. An Ethernet `NO-CARRIER` state means the physical
 link is unavailable, and the MQTT broker cannot be reached through that link.
+
+### ZED Camera Window
+
+Add `camera:=true` to `slam_rviz.launch.py` to start the ZED camera and a
+separate **DeerGo ZED Camera** window. The camera is disabled by default.
+Install camera support with
+`scripts/ros2_env.sh`; on a PC that already has ROS 2 installed, run
+`DEERGO_ZED_ONLY=1 bash scripts/ros2_env.sh` from the repository root instead
+of reinstalling the full environment. The installer uses official ZED SDK
+5.5.0, CUDA Toolkit 12.8 (without replacing the NVIDIA driver), wrapper
+`v5.5.0`, and the system OpenCV / `cv_bridge` packages. It requires sudo and
+builds the camera packages and `deergo_mqtt_bridge` in this repository's workspace.
+It also applies the repository's SDK reopen cleanup patch so a failed USB open
+can retry without getting stuck on `INVALID_FUNCTION_CALL`.
+For the original ZED (`2b03:f580`), a device-specific USB access rule lets launch
+reset an idle camera before opening the SDK stream, without runtime sudo.
+The preflight skips cameras already in use and does not reset other USB devices.
+
+RGB, left/right and depth topics stay under `/zed/`. The viewer discovers
+the actual rectified RGB topic and displays only the latest frame. Camera
+localization, mapping and dynamic TF are disabled; camera-internal TF is
+confined to `/zed/tf` and `/zed/tf_static`. Camera data is not connected to
+Cartographer, Nav2, LiDAR, MQTT, or robot control. The camera captures at 720p /
+30 FPS and publishes at up to 15 FPS, with point clouds disabled to limit
+resource use; CPU/GPU/USB resources are still shared with the host system.
+
+Closing the camera window (or pressing Q / Esc) only stops the viewer.
+Missing camera packages skip the camera branch without stopping SLAM; without
+a desktop display, the camera publishes topics without opening a window.
+Omit `camera` or set `camera:=false` to leave the camera disabled.
+`zed_camera_model` defaults to the first-generation `zed` model.
+
 
 ---
 
@@ -487,8 +557,10 @@ ros2 topic echo /scan --once --qos-reliability best_effort
 ros2 topic hz /scan
 ```
 
-The expected scan frame is `laser`. The current USB LiDAR produces 683 points
-per scan at approximately 10 Hz.
+The expected scan frame is `laser`. Point count, angular resolution and scan
+frequency depend on the connected LiDAR; the earlier 683-point / 10 Hz reading
+does not describe every replacement Hokuyo. `scan_bridge` does not assume a
+fixed point count.
 
 ---
 
@@ -662,7 +734,8 @@ ros2 run urg_node urg_node_driver \
   -p serial_port:=/dev/serial/by-id/usb-Hokuyo_Data_Flex_for_USB_URG-Series_USB_Driver-if00 \
   -p laser_frame_id:=laser \
   -p angle_min:=-2.09439510239 \
-  -p angle_max:=2.09439510239
+  -p angle_max:=2.09439510239 \
+  -p skip:=3
 ```
 
 Keep this terminal open. In another prepared terminal, check:
@@ -704,6 +777,22 @@ ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \
   start_nav2:=true \
   start_mqtt:=true
 ```
+
+### Enable the ZED Camera (Optional)
+
+The camera is disabled by default. Add `camera:=true` to either the mapping
+or localization command to start it together with its image window:
+
+```bash
+ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \
+  load_map:=true \
+  start_nav2:=true \
+  start_mqtt:=true \
+  camera:=true
+```
+
+Use `camera:=false` or omit the argument to keep the camera disabled.
+ROS 2 launch arguments use `:=`, so write `camera:=true`.
 
 ### Enable Robot Motion
 

@@ -1,0 +1,2 @@
+# Access only the first-generation ZED USB device; no runtime sudo is needed.
+SUBSYSTEM=="usb", ATTR{idVendor}=="2b03", ATTR{idProduct}=="f580", GROUP="plugdev", MODE="0660", TAG+="uaccess"

@@ -1,0 +1,35 @@
+# Camera-only configuration. No robot localization, navigation or control input.
+/**:
+  ros__parameters:
+    general:
+      grab_resolution: 'HD720'
+      # Keep capture at the model's default 30 FPS; limit ROS publication below.
+      grab_frame_rate: 30
+      pub_frame_rate: 15.0
+      camera_max_reconnect: 5
+    video:
+      publish_rgb: true
+      publish_left_right: true
+    depth:
+      depth_mode: 'NEURAL_LIGHT'
+      depth_stabilization: 0
+      publish_depth_map: true
+      publish_point_cloud: false
+    pos_tracking:
+      pos_tracking_enabled: false
+      publish_tf: false
+      publish_map_tf: false
+      publish_odom_pose: false
+      map_frame: 'zed_map'
+      odometry_frame: 'zed_odom'
+    sensors:
+      publish_imu_tf: false
+      publish_imu: false
+    mapping:
+      mapping_enabled: false
+    object_detection:
+      od_enabled: false
+    body_tracking:
+      bt_enabled: false
+    debug:
+      disable_nitros: true

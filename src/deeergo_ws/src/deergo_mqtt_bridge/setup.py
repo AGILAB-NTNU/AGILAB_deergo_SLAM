@@ -73,6 +73,7 @@ setup(
             'mqtt_bridge = deergo_mqtt_bridge.mqtt_bridge:main',
             'scan_bridge = deergo_mqtt_bridge.scan_bridge:main',
             'map_manager = deergo_mqtt_bridge.map_manager:main',
+            'zed_image_viewer = deergo_mqtt_bridge.zed_image_viewer:main',
 
             'cartographer_odom_bridge = '
             'deergo_mqtt_bridge.cartographer_odom_bridge:main',

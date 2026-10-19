@@ -63,6 +63,8 @@ build/
 log/
 *.db3
 docs/maps/
+# Installed by scripts/ros2_env.sh at a pinned upstream release.
+src/deeergo_ws/src/zed-ros2-wrapper/
 
 
 # 4. 資料與模型 (保留目錄結構，忽略內部資料)
@@ -100,4 +102,3 @@ venv.bak/
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
-

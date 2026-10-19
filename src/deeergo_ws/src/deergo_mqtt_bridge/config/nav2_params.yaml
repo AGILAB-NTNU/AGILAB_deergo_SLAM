@@ -208,8 +208,8 @@ local_costmap:
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 4.0
-        inflation_radius: 0.8
+        cost_scaling_factor: 6.0
+        inflation_radius: 0.6
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -251,7 +251,14 @@ global_costmap:
       # Cartographer publishes occupancy values below 100, including walls.
       lethal_cost_threshold: 65
       trinary_costmap: true
-      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      # Remove static-map speckles before live obstacles are added and inflated.
+      plugins: ["static_layer", "denoise_layer", "obstacle_layer", "inflation_layer"]
+      denoise_layer:
+        plugin: "nav2_costmap_2d::DenoiseLayer"
+        enabled: true
+        # Keep groups of 3+ cells, including diagonally connected cells.
+        minimal_group_size: 3
+        group_connectivity_type: 8
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -275,8 +282,8 @@ global_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         # Keep global paths away from unobserved space, including corners.
         inflate_around_unknown: true
-        cost_scaling_factor: 4.0
-        inflation_radius: 0.8
+        cost_scaling_factor: 6.0
+        inflation_radius: 0.6
       always_send_full_costmap: True
 map_server:
   ros__parameters:

@@ -13,22 +13,25 @@
 #   - MQTT client libraries
 #   - Network debugging tools
 #   - Optional Python data-analysis tools
+#   - ZED SDK 5.5.0 / CUDA Toolkit 12.8 / ROS 2 wrapper and OpenCV viewer
 #
 # DeerGo network configuration is handled separately by:
 #   scripts/deergo_connect.sh
 #
 # Usage:
-#   chmod +x scripts/install_deergo_pc_humble.sh
-#   ./scripts/install_deergo_pc_humble.sh
+#   bash scripts/ros2_env.sh
 #
 # Optional:
 #   DEERGO_DOMAIN_ID=13 \
 #   DEERGO_RMW=rmw_fastrtps_cpp \
 #   DEERGO_WS="$HOME/deergo_ws" \
-#   ./scripts/install_deergo_pc_humble.sh
+#   bash scripts/ros2_env.sh
 #
 # Skip ~/.bashrc modification:
-#   SKIP_BASHRC=1 ./scripts/install_deergo_pc_humble.sh
+#   SKIP_BASHRC=1 bash scripts/ros2_env.sh
+#
+# Add only the ZED camera to an existing ROS 2 installation:
+#   DEERGO_ZED_ONLY=1 bash scripts/ros2_env.sh
 #
 
 set -Eeuo pipefail
@@ -38,12 +41,17 @@ set -Eeuo pipefail
 # Configuration
 # ================================================================
 
-readonly ROS_DISTRO="humble"
+readonly DEERGO_ROS_DISTRO="humble"
 readonly REQUIRED_UBUNTU_CODENAME="jammy"
 
 DEERGO_DOMAIN_ID="${DEERGO_DOMAIN_ID:-13}"
 DEERGO_RMW="${DEERGO_RMW:-rmw_fastrtps_cpp}"
-DEERGO_WS="${DEERGO_WS:-$HOME/deergo_ws}"
+DEERGO_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEERGO_WS="${DEERGO_WS:-${DEERGO_SCRIPT_DIR}/../src/deeergo_ws}"
+DEERGO_ZED_ONLY="${DEERGO_ZED_ONLY:-0}"
+DEERGO_ZED_INSTALLER="${DEERGO_ZED_INSTALLER:-}"
+readonly DEERGO_ZED_TAG="v5.5.0"
+readonly DEERGO_ZED_URL="https://download.stereolabs.com/zedsdk/5.5.0/cu12_trt10/ubuntu22"
 
 SKIP_BASHRC="${SKIP_BASHRC:-0}"
 
@@ -123,10 +131,116 @@ if ! [[ "$DEERGO_DOMAIN_ID" =~ ^[0-9]+$ ]] \
 fi
 
 log "Ubuntu check passed: ${PRETTY_NAME}"
-log "ROS distribution: ${ROS_DISTRO}"
+log "ROS distribution: ${DEERGO_ROS_DISTRO}"
 log "ROS_DOMAIN_ID: ${DEERGO_DOMAIN_ID}"
 log "RMW implementation: ${DEERGO_RMW}"
 log "Workspace: ${DEERGO_WS}"
+
+
+# ================================================================
+# Independent ZED camera (also usable on an existing ROS installation)
+# ================================================================
+
+install_deergo_zed() {
+    log "Installing independent ZED camera support..."
+    export PYTHONNOUSERSITE=1
+    command -v nvidia-smi >/dev/null || die "Install a working NVIDIA driver before ZED."
+    nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+    [[ -f /opt/ros/humble/setup.bash ]] || die "ROS 2 Humble must be installed first."
+
+    sudo apt-get update
+    sudo apt-get install -y \
+        curl ca-certificates git zstd build-essential cmake python3-colcon-common-extensions \
+        python3-rosdep python3-opencv python3-numpy ros-humble-cv-bridge udev psmisc
+
+    # The SDK's rules omit USB ID f580 (the original ZED). Allow this device's
+    # launch preflight to clear its USB stream without running ROS nodes as root.
+    sudo install -m 0644 "${DEERGO_SCRIPT_DIR}/udev/70-deergo-zed.rules" \
+        /etc/udev/rules.d/70-deergo-zed.rules
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger --action=add --subsystem-match=usb \
+        --attr-match=idVendor=2b03 --attr-match=idProduct=f580
+    sudo udevadm settle --timeout=10
+
+    # Toolkit-only package: preserve the existing working NVIDIA driver.
+    if [[ ! -x /usr/local/cuda-12.8/bin/nvcc ]]; then
+        if ! dpkg-query -W -f='${Status}' cuda-keyring 2>/dev/null | grep -q 'install ok installed'; then
+            local zed_keyring
+            zed_keyring="$(mktemp /tmp/deergo-cuda-keyring.XXXXXX.deb)"
+            curl -fL --retry 2 -o "$zed_keyring" \
+                https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+            sudo dpkg -i "$zed_keyring"
+            rm -f "$zed_keyring"
+        fi
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends cuda-toolkit-12-8
+    fi
+    export PATH="/usr/local/cuda-12.8/bin:$PATH"
+    /usr/local/cuda-12.8/bin/nvcc --version
+
+    if [[ ! -f /usr/local/zed/include/sl/Camera.hpp ]]; then
+        local zed_installer zed_downloaded=0
+        zed_installer="$DEERGO_ZED_INSTALLER"
+        if [[ -z "$zed_installer" ]]; then
+            zed_installer="$(mktemp /tmp/deergo-zed-sdk.XXXXXX.run)"
+            zed_downloaded=1
+            curl -fL --retry 2 -o "$zed_installer" "$DEERGO_ZED_URL"
+        fi
+        [[ -f "$zed_installer" ]] || die "ZED installer missing: $zed_installer"
+        head -n 1 "$zed_installer" | grep -q '^#!' || die "Downloaded ZED installer is not a shell installer."
+        # Keep tools and headers; do not install CUDA drivers or Python pip packages.
+        bash "$zed_installer" -- silent skip_cuda skip_python skip_hub
+        if [[ "$zed_downloaded" == 1 ]]; then
+            rm -f "$zed_installer"
+        fi
+    fi
+    [[ -f /usr/local/zed/zed-config-version.cmake ]] || die "ZED SDK development files are missing."
+    grep -Eq '5\.5\.0' /usr/local/zed/zed-config-version.cmake \
+        || die "Expected ZED SDK 5.5.0; inspect the existing SDK before replacing it."
+
+    local zed_wrapper_dir="${DEERGO_WS}/src/zed-ros2-wrapper"
+    mkdir -p "${DEERGO_WS}/src"
+    if [[ ! -e "$zed_wrapper_dir" ]]; then
+        git clone --branch "$DEERGO_ZED_TAG" --depth 1 \
+            https://github.com/stereolabs/zed-ros2-wrapper.git "$zed_wrapper_dir"
+    else
+        [[ "$(git -C "$zed_wrapper_dir" describe --tags --exact-match 2>/dev/null)" == "$DEERGO_ZED_TAG" ]] \
+            || die "Existing ZED wrapper is not $DEERGO_ZED_TAG; it was not modified."
+    fi
+
+    local zed_reopen_patch="${DEERGO_SCRIPT_DIR}/patches/zed-wrapper-5.5.0-reopen.patch"
+    if git -C "$zed_wrapper_dir" apply --reverse --check "$zed_reopen_patch" 2>/dev/null; then
+        log "ZED SDK reopen cleanup patch is already applied."
+    elif git -C "$zed_wrapper_dir" apply --check "$zed_reopen_patch"; then
+        git -C "$zed_wrapper_dir" apply "$zed_reopen_patch"
+    else
+        die "Cannot apply the ZED reopen patch; existing wrapper changes were preserved."
+    fi
+
+    # ROS setup scripts can reference unset variables.
+    set +u
+    source /opt/ros/humble/setup.bash
+    set -u
+    if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
+        sudo rosdep init
+    fi
+    rosdep update
+    rosdep install --from-paths "$zed_wrapper_dir" --ignore-src --rosdistro humble -y
+    (
+        cd "$DEERGO_WS"
+        # Match the existing workspace's normal install mode. Older Humble
+        # symlink_data fails when adding a new config file to an existing install.
+        MAKEFLAGS=-j2 colcon build \
+            --packages-up-to zed_wrapper deergo_mqtt_bridge \
+            --parallel-workers 2 --cmake-args -DCMAKE_BUILD_TYPE=Release
+    )
+    log "ZED installed. Source ${DEERGO_WS}/install/setup.bash; existing SLAM launch commands now also open the camera window."
+}
+
+if [[ "$DEERGO_ZED_ONLY" == 1 ]]; then
+    install_deergo_zed
+    exit 0
+fi
 
 
 # ================================================================
@@ -311,6 +425,8 @@ log "Preparing DeerGo ROS 2 workspace..."
 
 mkdir -p "${DEERGO_WS}/src"
 
+install_deergo_zed
+
 
 # ================================================================
 # ~/.bashrc
@@ -335,7 +451,7 @@ if [[ "$SKIP_BASHRC" != "1" ]]; then
 
 ${START_MARKER}
 
-source /opt/ros/${ROS_DISTRO}/setup.bash
+source /opt/ros/${DEERGO_ROS_DISTRO}/setup.bash
 
 export ROS_DOMAIN_ID=${DEERGO_DOMAIN_ID}
 export ROS_LOCALHOST_ONLY=0
@@ -360,7 +476,7 @@ fi
 log "Verifying ROS 2 / Nav2 / Cartographer installation..."
 
 # shellcheck disable=SC1091
-source "/opt/ros/${ROS_DISTRO}/setup.bash"
+source "/opt/ros/${DEERGO_ROS_DISTRO}/setup.bash"
 
 command -v ros2 >/dev/null
 

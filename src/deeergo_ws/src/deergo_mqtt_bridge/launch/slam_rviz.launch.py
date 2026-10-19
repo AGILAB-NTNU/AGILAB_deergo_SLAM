@@ -2,18 +2,113 @@
 
 import os
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import (
+    PackageNotFoundError,
+    get_package_share_directory,
+)
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
+    GroupAction,
     IncludeLaunchDescription,
     LogInfo,
     OpaqueFunction,
+    RegisterEventHandler,
 )
 from launch.conditions import IfCondition, UnlessCondition
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetRemap
+
+
+def launch_zed_camera(context, deergo_share):
+    """Add a separate camera process; missing camera packages cannot stop SLAM."""
+    try:
+        zed_share = get_package_share_directory("zed_wrapper")
+        for package in ("zed_components", "zed_description", "cv_bridge"):
+            get_package_share_directory(package)
+    except PackageNotFoundError:
+        return [LogInfo(msg="ZED camera skipped: install it with scripts/ros2_env.sh.")]
+
+    preflight = ExecuteProcess(
+        cmd=[
+            "/usr/bin/python3",
+            "-m",
+            "deergo_mqtt_bridge.zed_camera_preflight",
+            "--camera-model",
+            LaunchConfiguration("zed_camera_model"),
+        ],
+        name="zed_camera_preflight",
+        output="screen",
+        additional_env={"PYTHONNOUSERSITE": "1"},
+    )
+
+    # Start a fresh scoped group after the asynchronous preflight completes.
+    # Remaps must be established inside this event, not in an already-popped scope.
+    def start_camera(event, launch_context):
+        return [zed_camera_group(launch_context, deergo_share, zed_share)]
+
+    return [
+        RegisterEventHandler(
+            OnProcessExit(target_action=preflight, on_exit=start_camera)
+        ),
+        preflight,
+    ]
+
+
+def zed_camera_group(context, deergo_share, zed_share):
+    """Build the camera branch without inheriting Nav2's container settings."""
+    camera = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(zed_share, "launch", "zed_camera.launch.py")
+        ),
+        launch_arguments={
+            "camera_model": LaunchConfiguration("zed_camera_model"),
+            "camera_name": "zed",
+            # Nav2 declares these names too. Do not inherit its container or namespace.
+            # Empty container_name makes the ZED launch create its own zed_container.
+            "container_name": "",
+            "namespace": "",
+            "node_name": "zed_node",
+            "use_sim_time": "false",
+            "publish_tf": "false",
+            "publish_map_tf": "false",
+            "publish_imu_tf": "false",
+            "enable_gnss": "false",
+            "ros_params_override_path": os.path.join(
+                deergo_share, "config", "zed_camera.yaml"
+            ),
+        }.items(),
+    )
+    actions = [
+        # Keep even camera-internal transforms off the robot's TF topics.
+        SetRemap(src="/tf", dst="/zed/tf"),
+        SetRemap(src="/tf_static", dst="/zed/tf_static"),
+        SetRemap(src="/joint_states", dst="/zed/joint_states"),
+        SetRemap(src="/diagnostics", dst="/zed/diagnostics"),
+        camera,
+    ]
+    if context.environment.get("DISPLAY") or context.environment.get("WAYLAND_DISPLAY"):
+        actions.append(
+            Node(
+                package="deergo_mqtt_bridge",
+                executable="zed_image_viewer",
+                namespace="zed",
+                name="zed_image_viewer",
+                output="screen",
+                parameters=[{"use_sim_time": False}],
+                # Use Humble's OpenCV / NumPy, not unrelated user pip packages.
+                additional_env={"PYTHONNOUSERSITE": "1"},
+            )
+        )
+    else:
+        actions.append(
+            LogInfo(msg="ZED topics enabled; no desktop display for the camera window.")
+        )
+    return GroupAction(actions=actions)
+
 
 # ================================================================
 # Validate Cartographer PBStream
@@ -59,7 +154,6 @@ def validate_pbstream(
 
 
 def generate_launch_description():
-
     # ============================================================
     # Package paths
     # ============================================================
@@ -331,6 +425,18 @@ def generate_launch_description():
             declare_start_nav2,
             declare_start_mqtt,
             declare_use_sim_time,
+            DeclareLaunchArgument(
+                "camera",
+                default_value="false",
+                description=(
+                    "Start the independent ZED camera and image window when true"
+                ),
+            ),
+            DeclareLaunchArgument(
+                "zed_camera_model",
+                default_value="zed",
+                description="ZED SDK camera model (default: first-generation ZED)",
+            ),
             validate_map,
             deergo_nodes,
             cartographer_mapping,
@@ -339,5 +445,10 @@ def generate_launch_description():
             cartographer_odom_bridge,
             navigation,
             rviz,
+            OpaqueFunction(
+                function=launch_zed_camera,
+                args=[deergo_share],
+                condition=IfCondition(LaunchConfiguration("camera")),
+            ),
         ]
     )
