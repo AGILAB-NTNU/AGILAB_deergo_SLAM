@@ -77,6 +77,11 @@ LIDAR_FRAME="laser"
 LIDAR_ANGLE_MIN="-2.09439510239"
 LIDAR_ANGLE_MAX="2.09439510239"
 
+# Output rate = native scan rate / (skip + 1).
+# For this 40 Hz Hokuyo: 3 -> ~10 Hz, 1 -> ~20 Hz, 0 -> ~40 Hz.
+# Applied when starting a new driver; re-sourcing reuses a healthy driver.
+LIDAR_SKIP="3"
+
 echo "[DeerGo] Checking Hokuyo LiDAR..."
 
 deergo_scan_is_arriving() {
@@ -113,7 +118,8 @@ else
         if deergo_scan_is_arriving; then
             LIDAR_READY=true
             echo "[DeerGo] /scan is receiving LaserScan messages."
-            echo "[DeerGo] Reusing the running driver; stop it first to apply this script's +/- 120 deg settings."
+            echo "[DeerGo] Reusing the running driver; scan settings have not been changed."
+            echo "[DeerGo] Stop it first to apply the configured FOV and skip=${LIDAR_SKIP}."
         else
             echo "[DeerGo] Driver is alive but /scan is unavailable; restarting this LiDAR."
             for LIDAR_PID in ${LIDAR_PIDS}; do
@@ -147,6 +153,7 @@ else
         echo "[DeerGo] Baud    : ${LIDAR_BAUD}"
         echo "[DeerGo] Frame   : ${LIDAR_FRAME}"
         echo "[DeerGo] Scan FOV: -120 deg ~ +120 deg"
+        echo "[DeerGo] Skip    : ${LIDAR_SKIP} (40 Hz / (skip + 1); verify with ros2 topic hz /scan)"
 
         nohup ros2 run urg_node urg_node_driver \
             --ros-args \
@@ -155,6 +162,7 @@ else
             -p laser_frame_id:="${LIDAR_FRAME}" \
             -p angle_min:="${LIDAR_ANGLE_MIN}" \
             -p angle_max:="${LIDAR_ANGLE_MAX}" \
+            -p skip:="${LIDAR_SKIP}" \
             > /tmp/deergo_hokuyo.log 2>&1 &
 
         # ----------------------------------------------------
@@ -222,6 +230,7 @@ echo "  baud      = ${LIDAR_BAUD}"
 echo "  frame     = ${LIDAR_FRAME}"
 echo "  angle_min = -120 deg"
 echo "  angle_max = +120 deg"
+echo "  skip (configured) = ${LIDAR_SKIP}; reused drivers keep their existing setting"
 echo "  raw topic = /scan"
 
 echo
