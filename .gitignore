@@ -75,6 +75,7 @@ data/*
 
 # 5. Jupyter Notebook
 .ipynb_checkpoints
+/notebooks/odom_queue.csv
 
 
 # 6. 環境與虛擬環境

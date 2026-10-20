@@ -405,6 +405,36 @@ ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \
 Run mapping, saving, and localization from the same workspace directory.
 `maps/` is relative to the working directory in which Cartographer is launched.
 
+### save Navigation map points
+
+Keep the normal SLAM/Nav2 launch command. In another terminal, source the ROS
+and workspace environments and use the same domain (`ROS_DOMAIN_ID=13` here):
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=13
+
+# Park at each location, then save its map position and heading.
+ros2 run deergo_mqtt_bridge location save home
+ros2 run deergo_mqtt_bridge location save station_a
+ros2 run deergo_mqtt_bridge location save station_b
+
+ros2 run deergo_mqtt_bridge location list
+ros2 run deergo_mqtt_bridge location go station_a
+```
+
+Points persist in `src/deeergo_ws/maps/deergo_locations.yaml` relative to the
+repository root, independently of the terminal's working directory.
+Saving an existing name updates that point and preserves the
+others. `go` sends a `NavigateToPose` goal directly to Nav2 and exits after Nav2
+accepts it; acceptance does not mean arrival. Selecting another point with `go`
+updates the navigation target. No extra service or background node is needed.
+Only `go` sends a navigation goal; `save` and `list` do not move the robot.
+
+Use points with the same map they were recorded on; resave them after remapping.
+For separate map files, append `--file /absolute/path/points.yaml` to each command.
+
 ---
 
 ## DeerGo Motion Control

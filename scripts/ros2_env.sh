@@ -371,6 +371,7 @@ log "Installing DeerGo MQTT and network tools..."
 
 sudo apt-get install -y \
     python3-paho-mqtt \
+    python3-yaml \
     mosquitto-clients \
     netcat-openbsd
 

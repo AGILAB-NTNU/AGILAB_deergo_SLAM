@@ -83,7 +83,7 @@ LIDAR_ANGLE_MAX="2.09439510239"
 LIDAR_SKIP="3"
 
 echo "[DeerGo] Checking Hokuyo LiDAR..."
-
+echo "LIDAR_SKIP=${LIDAR_SKIP}"
 deergo_scan_is_arriving() {
     # A process or cached topic name does not prove the driver is publishing.
     timeout --signal=INT --kill-after=2s 10s \
