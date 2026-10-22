@@ -1,0 +1,8 @@
+<library path="deergo_queue_layers">
+  <class type="deergo_nav2_plugins::QueueObstacleLayer" base_class_type="nav2_costmap_2d::Layer">
+    <description>ObstacleLayer with configurable DDS and TF filter queue capacities.</description>
+  </class>
+  <class type="deergo_nav2_plugins::QueueVoxelLayer" base_class_type="nav2_costmap_2d::Layer">
+    <description>VoxelLayer with configurable DDS and TF filter queue capacities.</description>
+  </class>
+</library>

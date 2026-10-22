@@ -164,11 +164,11 @@ colcon build
 source install/setup.bash
 ```
 
-To rebuild only the DeerGo package:
+To rebuild the DeerGo package and its workspace dependencies:
 
 ```LiDAR
 colcon build \
-  --packages-select deergo_mqtt_bridge \
+  --packages-up-to deergo_mqtt_bridge \
   --symlink-install
 
 source install/setup.bash
@@ -357,8 +357,30 @@ the actual rectified RGB topic and displays only the latest frame. Camera
 localization, mapping and dynamic TF are disabled; camera-internal TF is
 confined to `/zed/tf` and `/zed/tf_static`. Camera data is not connected to
 Cartographer, Nav2, LiDAR, MQTT, or robot control. The camera captures at 720p /
-30 FPS and publishes at up to 15 FPS, with point clouds disabled to limit
-resource use; CPU/GPU/USB resources are still shared with the host system.
+30 FPS and targets up to 30 FPS ROS publication at the native 1280x720 resolution.
+RGB uses BGR8 instead of BGRA8, reducing bytes per RGB frame by 25% without
+changing color values. `NEURAL_LIGHT` uses SDK 5.5 CUDA Graph optimization when
+available; actual FPS still depends on GPU, CPU and camera connection health.
+Point clouds remain disabled; CPU/GPU/USB resources are shared with the host.
+
+The dedicated metric depth stream is already enabled:
+
+| Topic | Type / content |
+|---|---|
+| `/zed/zed_node/depth/depth_registered` | `sensor_msgs/msg/Image`, `32FC1`, meters |
+| `/zed/zed_node/depth/camera_info` | `sensor_msgs/msg/CameraInfo`, depth intrinsics |
+
+The wrapper publishes depth frames when a subscriber connects. Subscribe
+directly to this stream with `KEEP_LAST`, depth **1**, `BEST_EFFORT` and
+`VOLATILE` to keep only the newest available frame in your processing node.
+No additional relay or copy of the full-resolution depth image is needed.
+Invalid depth values can be NaN or infinity; check `isfinite` before processing.
+RGB and depth use separate topics; use matching timestamps when combining them.
+
+```bash
+ros2 topic echo /zed/zed_node/depth/depth_registered \
+  --once --field encoding --qos-reliability best_effort
+```
 
 Closing the camera window (or pressing Q / Esc) only stops the viewer.
 Missing camera packages skip the camera branch without stopping SLAM; without
@@ -404,6 +426,31 @@ ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \
 
 Run mapping, saving, and localization from the same workspace directory.
 `maps/` is relative to the working directory in which Cartographer is launched.
+
+### Nav2 Scan Receiver Queues
+
+The local voxel layer uses `deergo_nav2_plugins::QueueVoxelLayer`; the global
+obstacle layer uses `deergo_nav2_plugins::QueueObstacleLayer`. Both inherit the
+original Nav2 processing and set **DDS receive depth and TF MessageFilter
+capacity to 10** in the supplied YAML files. The system Nav2 libraries remain unchanged.
+
+Set `scan_queue_size` under the voxel and obstacle layer sections in the Nav2
+YAML files. This is an initialization setting: restart Nav2 after editing it.
+Queue size limits message count, not elapsed latency; when full, the oldest
+waiting messages are discarded. TF tolerances and controller and costmap
+frequencies are unchanged. The connection script starts the Hokuyo with `skip=3`
+for approximately 10 Hz output; an already running driver retains its current setting.
+
+At 40 Hz a new scan arrives every 25 ms. A TF filter capacity of 1 can repeatedly
+discard scans if the required transforms take longer than this to become available.
+The upstream layers also wait for TF at the scan timestamp plus 50 ms; reducing
+the queue does not shorten this wait and can prevent live obstacles from updating.
+
+Build with `colcon build --packages-up-to deergo_mqtt_bridge`, then source
+`install/setup.bash`. The normal launch command stays the same. To restore the
+upstream layers, change the two plugin names back to
+`nav2_costmap_2d::VoxelLayer` and `nav2_costmap_2d::ObstacleLayer` and remove
+their `scan_queue_size` entries.
 
 ### save Navigation map points
 
@@ -729,7 +776,7 @@ ros2 topic echo /scan --once --qos-reliability best_effort
 After changing source code or configuration, rebuild before launching:
 
 ```bash
-colcon build --packages-select deergo_mqtt_bridge --symlink-install
+colcon build --packages-up-to deergo_mqtt_bridge --symlink-install
 source install/setup.bash
 ```
 

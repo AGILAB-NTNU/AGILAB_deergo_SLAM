@@ -80,6 +80,8 @@ LIDAR_ANGLE_MAX="2.09439510239"
 # Output rate = native scan rate / (skip + 1).
 # For this 40 Hz Hokuyo: 3 -> ~10 Hz, 1 -> ~20 Hz, 0 -> ~40 Hz.
 # Applied when starting a new driver; re-sourcing reuses a healthy driver.
+
+# LIDAR_SKIP="3"
 LIDAR_SKIP="3"
 
 echo "[DeerGo] Checking Hokuyo LiDAR..."

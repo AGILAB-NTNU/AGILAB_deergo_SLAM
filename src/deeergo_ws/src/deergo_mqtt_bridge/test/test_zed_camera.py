@@ -127,6 +127,23 @@ def test_camera_configuration_disables_robot_state_outputs():
     assert not config["mapping"]["mapping_enabled"]
 
 
+def test_camera_keeps_full_resolution_and_numeric_depth_available():
+    document = yaml.safe_load((PACKAGE / "config/zed_camera.yaml").read_text())
+    config = document["/**"]["ros__parameters"]
+    assert config["general"]["grab_resolution"] == "HD720"
+    assert config["general"]["pub_resolution"] == "NATIVE"
+    assert config["depth"]["publish_depth_map"]
+    assert not config["depth"]["openni_depth_mode"]
+
+
+def test_viewer_accepts_bgr_frames_without_changing_color_values():
+    viewer = object.__new__(ZedImageViewer)
+    viewer.bridge = CvBridge()
+    pixels = np.array([[[10, 20, 30], [80, 90, 100]]], dtype=np.uint8)
+    viewer.receive_image(viewer.bridge.cv2_to_imgmsg(pixels, "bgr8"))
+    np.testing.assert_array_equal(viewer.take_frame(), pixels)
+
+
 @pytest.mark.parametrize("busy", [True, False])
 def test_preflight_resets_only_idle_zed(monkeypatch, tmp_path, busy):
     device = tmp_path / "2-1"
