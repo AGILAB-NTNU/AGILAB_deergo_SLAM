@@ -3,16 +3,23 @@
   ros__parameters:
     general:
       grab_resolution: 'HD720'
-      # Keep capture at the model's default 30 FPS; limit ROS publication below.
+      # Preserve 1280x720 for both RGB and metric depth.
       grab_frame_rate: 30
-      pub_frame_rate: 15.0
+      pub_resolution: 'NATIVE'
+      pub_frame_rate: 30.0
       camera_max_reconnect: 5
     video:
+      # BGR instead of BGRA: 25% fewer RGB bytes and no viewer alpha conversion.
+      enable_24bit_output: true
       publish_rgb: true
       publish_left_right: true
     depth:
       depth_mode: 'NEURAL_LIGHT'
+      # SDK 5.5: reduce inference launch overhead; SDK falls back if unsupported.
+      allow_depth_cuda_graph: true
       depth_stabilization: 0
+      # Numeric depth image: 32FC1, in meters (not a colorized preview).
+      openni_depth_mode: false
       publish_depth_map: true
       publish_point_cloud: false
     pos_tracking:
