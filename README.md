@@ -257,8 +257,12 @@ The current static TF uses `base_link -> laser`, so the scan frame must be
 `laser`. If the driver publishes a different frame, align its frame setting
 with the static TF before starting Cartographer.
 The current mounting correction uses `roll = pi` (180 degrees) to align the
-LiDAR's left/right direction with the robot frame. The offset remains
-`x = 0.8 m`, `y = 0`, `z = 0`; `/scan_sync` still preserves `/scan` unchanged.
+LiDAR's left/right direction with the robot frame. The offset is
+`x = 1.0 m`, `y = 0`, `z = 0`; `/scan_sync` still preserves `/scan` unchanged.
+`base_link` is at the rear drive axle / rotation center. In `nav2_params.yaml`,
+the body extends 1.05 m forward and 0.10 m behind this origin, with 0.30 m on
+each side. Both costmaps use this footprint. The local window is 12 x 12 m;
+LiDAR obstacles are marked within 5 m and cleared by rays up to 6 m.
 
 ---
 

@@ -42,6 +42,7 @@ def generate_launch_description():
     # ============================================================
     # Static TF
     # base_link -> laser (matches Hokuyo LaserScan.header.frame_id)
+    # base_link is the rear drive axle / rotation center; LiDAR is 1 m ahead.
     # Roll pi corrects the observed left/right mirror in the mounted LiDAR.
     # The laser X axis stays forward; its Y and Z axes are reversed.
     # ============================================================
@@ -53,7 +54,7 @@ def generate_launch_description():
         output="screen",
         arguments=[
             "--x",
-            "0.8",
+            "1.0",
             "--y",
             "0",
             "--z",
