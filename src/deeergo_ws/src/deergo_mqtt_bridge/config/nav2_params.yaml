@@ -148,9 +148,17 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.10
       yaw_goal_tolerance: 0.10
-    # DWB parameters
+    # Rotate towards a new path before handing control to DWB.
     FollowPath:
-      plugin: "dwb_core::DWBLocalPlanner"
+      plugin: "nav2_rotation_shim_controller::RotationShimController"
+      primary_controller: "dwb_core::DWBLocalPlanner"
+      angular_dist_threshold: 0.785  # Start rotation above 45 degrees.
+      angular_disengage_threshold: 0.20  # Hand over within about 11 degrees.
+      forward_sampling_distance: 0.5
+      rotate_to_heading_angular_vel: 0.4
+      max_angular_accel: 0.4
+      simulate_ahead_time: 1.0
+      # DWB parameters stay in the same FollowPath namespace.
       debug_trajectory_details: True
       min_vel_x: -0.40
       min_vel_y: 0.0
@@ -211,7 +219,9 @@ local_costmap:
         cost_scaling_factor: 6.0
         inflation_radius: 0.6
       voxel_layer:
-        plugin: "nav2_costmap_2d::VoxelLayer"
+        plugin: "deergo_nav2_plugins::QueueVoxelLayer"
+        # Initialization setting for both DDS and TF MessageFilter queues.
+        scan_queue_size: 10
         enabled: True
         publish_voxel_map: True
         # Keep z=0 scans inside the grid despite roll=pi TF rounding.
@@ -260,7 +270,8 @@ global_costmap:
         minimal_group_size: 3
         group_connectivity_type: 8
       obstacle_layer:
-        plugin: "nav2_costmap_2d::ObstacleLayer"
+        plugin: "deergo_nav2_plugins::QueueObstacleLayer"
+        scan_queue_size: 10
         enabled: True
         min_obstacle_height: -0.001  # Match the scan source's height tolerance
         observation_sources: scan
