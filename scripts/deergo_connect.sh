@@ -84,8 +84,14 @@ LIDAR_ANGLE_MAX="2.09439510239"
 # LIDAR_SKIP="3"
 LIDAR_SKIP="3"
 
+# Angular grouping: 1 = full points, 2 = approximately half the points.
+# UTM-30LX: cluster=2 changes the angular spacing from 0.25 to 0.5 degrees.
+# This does not change the scan output frequency controlled by LIDAR_SKIP.
+LIDAR_CLUSTER="2"
+
 echo "[DeerGo] Checking Hokuyo LiDAR..."
 echo "LIDAR_SKIP=${LIDAR_SKIP}"
+echo "LIDAR_CLUSTER=${LIDAR_CLUSTER}"
 deergo_scan_is_arriving() {
     # A process or cached topic name does not prove the driver is publishing.
     timeout --signal=INT --kill-after=2s 10s \
@@ -121,7 +127,7 @@ else
             LIDAR_READY=true
             echo "[DeerGo] /scan is receiving LaserScan messages."
             echo "[DeerGo] Reusing the running driver; scan settings have not been changed."
-            echo "[DeerGo] Stop it first to apply the configured FOV and skip=${LIDAR_SKIP}."
+            echo "[DeerGo] Stop it first to apply FOV, skip=${LIDAR_SKIP}, cluster=${LIDAR_CLUSTER}."
         else
             echo "[DeerGo] Driver is alive but /scan is unavailable; restarting this LiDAR."
             for LIDAR_PID in ${LIDAR_PIDS}; do
@@ -156,6 +162,7 @@ else
         echo "[DeerGo] Frame   : ${LIDAR_FRAME}"
         echo "[DeerGo] Scan FOV: -120 deg ~ +120 deg"
         echo "[DeerGo] Skip    : ${LIDAR_SKIP} (40 Hz / (skip + 1); verify with ros2 topic hz /scan)"
+        echo "[DeerGo] Cluster : ${LIDAR_CLUSTER} (angular grouping; 2 = approximately half the points)"
 
         nohup ros2 run urg_node urg_node_driver \
             --ros-args \
@@ -165,6 +172,7 @@ else
             -p angle_min:="${LIDAR_ANGLE_MIN}" \
             -p angle_max:="${LIDAR_ANGLE_MAX}" \
             -p skip:="${LIDAR_SKIP}" \
+            -p cluster:="${LIDAR_CLUSTER}" \
             > /tmp/deergo_hokuyo.log 2>&1 &
 
         # ----------------------------------------------------
@@ -233,6 +241,7 @@ echo "  frame     = ${LIDAR_FRAME}"
 echo "  angle_min = -120 deg"
 echo "  angle_max = +120 deg"
 echo "  skip (configured) = ${LIDAR_SKIP}; reused drivers keep their existing setting"
+echo "  cluster (configured) = ${LIDAR_CLUSTER}; reused drivers keep their existing setting"
 echo "  raw topic = /scan"
 
 echo
