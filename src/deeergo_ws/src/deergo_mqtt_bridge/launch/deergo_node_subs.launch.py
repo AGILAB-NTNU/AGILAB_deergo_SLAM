@@ -29,7 +29,7 @@ def generate_launch_description():
 
     # ============================================================
     # Scan Bridge
-    # /scan -> /scan_sync
+    # /scan -> per-beam EMA -> /scan_sync
     # ============================================================
 
     scan_bridge = Node(

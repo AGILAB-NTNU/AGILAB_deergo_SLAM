@@ -14,7 +14,7 @@ The system integrates:
 
 - DeerGo MQTT velocity-command communication
 - Hokuyo UTM-30LX LiDAR through `urg_node`
-- LaserScan pass-through from `/scan` to `/scan_sync`
+- LaserScan EMA preprocessing from `/scan` to `/scan_sync`
 - LiDAR-only Cartographer 2D mapping and pure localization
 - Cartographer TF-to-odometry bridge publishing `/odom`
 - Nav2 autonomous navigation
@@ -110,8 +110,9 @@ flowchart TD
     MQTT -->|Puffer/DeerGo_001/vel| DeerGo[DeerGo robot]
 ```
 
-`scan_bridge` preserves the original scan timestamp, frame, ranges, and timing
-metadata. Cartographer settings are maintained in
+`scan_bridge` applies per-beam EMA to valid distances and preserves the original
+timestamp, frame, angles, timing metadata, and intensities. Both Cartographer and
+Nav2 use this `/scan_sync` stream. Cartographer settings are maintained in
 `config/cartographer_mapping.lua` and `config/cartographer_localization.lua`.
 
 ---
@@ -258,7 +259,8 @@ The current static TF uses `base_link -> laser`, so the scan frame must be
 with the static TF before starting Cartographer.
 The current mounting correction uses `roll = pi` (180 degrees) to align the
 LiDAR's left/right direction with the robot frame. The offset is
-`x = 1.0 m`, `y = 0`, `z = 0`; `/scan_sync` still preserves `/scan` unchanged.
+`x = 1.0 m`, `y = 0`, `z = 0`; `/scan_sync` preserves the incoming scan geometry
+and timestamps while applying EMA to distances.
 `base_link` is at the rear drive axle / rotation center. In `nav2_params.yaml`,
 the body extends 1.05 m forward and 0.10 m behind this origin, with 0.30 m on
 each side. Both costmaps use this footprint. The local window is 12 x 12 m;
@@ -647,7 +649,36 @@ fixed point count.
 
 ### Check Synchronized LiDAR
 
-`/scan_sync` is an unchanged pass-through of `/scan`.
+`/scan_sync` applies a causal first-order EMA independently to each laser beam:
+`filtered = alpha * current + (1 - alpha) * previous_filtered`.
+The first sample passes through. Invalid returns (`NaN`, `inf`, or out-of-range
+distances), geometry changes, non-increasing timestamps and long scan gaps reset
+the relevant history. Raw-to-raw distance changes above the threshold pass through
+immediately and restart that beam's history. Original timestamps and all fields
+other than `ranges` are preserved; each incoming scan produces one output.
+
+| `/scan_bridge` parameter | Default | Meaning |
+| --- | --- | --- |
+| `ema_enabled` | `true` | Enable EMA; `false` forwards the raw message |
+| `ema_alpha` | `0.8` | Current sample weight, in `(0, 1]`; smaller values smooth more |
+| `ema_jump_threshold_m` | `0.03` | Reset a beam when consecutive raw distances differ by more than this |
+| `ema_reset_gap_s` | `0.2` | Reset all beams after a timestamp gap longer than this |
+
+Parameters can be changed while the node runs. Accepted changes take effect on the
+next scan and reset the filter history. Changes made with `ros2 param set` last
+until the node restarts; startup defaults are declared in `scan_bridge.py`.
+
+```bash
+ros2 param get /scan_bridge ema_alpha
+ros2 param set /scan_bridge ema_alpha 0.8
+ros2 param set /scan_bridge ema_enabled false
+ros2 param set /scan_bridge ema_enabled true
+```
+
+At 10 Hz, alpha=0.8 has approximately 25 ms of low-frequency filter group delay
+when no reset occurs. This is smoothing lag, not measured ROS queue latency.
+Gradual real distance changes are also smoothed; the 3 cm bypass only handles
+larger jumps. Compare `/scan` and `/scan_sync` during stationary and moving tests.
 
 ```bash
 ros2 topic echo /scan_sync
@@ -681,7 +712,7 @@ In `rviz/deergo_cartographer.rviz`:
 | Display topic | Meaning |
 | --- | --- |
 | `/map` | Occupancy map; darker cells indicate higher occupancy probability |
-| `/scan_sync` | Raw Hokuyo scan |
+| `/scan_sync` | EMA-preprocessed Hokuyo scan |
 | `/scan_matched_points2` | Cartographer's aligned scan points, shown in red |
 | `/local_costmap/published_footprint` | Nav2 robot footprint, shown in red when its costmap is active |
 
