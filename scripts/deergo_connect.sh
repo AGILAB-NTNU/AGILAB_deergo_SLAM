@@ -87,7 +87,7 @@ LIDAR_SKIP="3"
 # Angular grouping: 1 = full points, 2 = approximately half the points.
 # UTM-30LX: cluster=2 changes the angular spacing from 0.25 to 0.5 degrees.
 # This does not change the scan output frequency controlled by LIDAR_SKIP.
-LIDAR_CLUSTER="3"
+LIDAR_CLUSTER="4"
 
 echo "[DeerGo] Checking Hokuyo LiDAR..."
 echo "LIDAR_SKIP=${LIDAR_SKIP}"
