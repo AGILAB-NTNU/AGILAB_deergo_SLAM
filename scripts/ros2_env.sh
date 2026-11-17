@@ -33,6 +33,9 @@
 # Add only the ZED camera to an existing ROS 2 installation:
 #   DEERGO_ZED_ONLY=1 bash scripts/ros2_env.sh
 #
+# MPPI is installed separately (auto CUDA / CPU fallback):
+#   bash scripts/install_mppi.sh
+#
 
 set -Eeuo pipefail
 
@@ -49,6 +52,7 @@ DEERGO_RMW="${DEERGO_RMW:-rmw_fastrtps_cpp}"
 DEERGO_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DEERGO_WS="${DEERGO_WS:-${DEERGO_SCRIPT_DIR}/../src/deeergo_ws}"
 DEERGO_ZED_ONLY="${DEERGO_ZED_ONLY:-0}"
+DEERGO_INSTALL_ZED="${DEERGO_INSTALL_ZED:-auto}"
 DEERGO_ZED_INSTALLER="${DEERGO_ZED_INSTALLER:-}"
 readonly DEERGO_ZED_TAG="v5.5.0"
 readonly DEERGO_ZED_URL="https://download.stereolabs.com/zedsdk/5.5.0/cu12_trt10/ubuntu22"
@@ -86,6 +90,10 @@ on_error() {
 }
 
 trap on_error ERR
+
+if [[ "${DEERGO_MPPI_ONLY:-0}" == 1 ]]; then
+    die "MPPI installation is separate. Run: bash ${DEERGO_SCRIPT_DIR}/install_mppi.sh"
+fi
 
 
 # ================================================================
@@ -241,7 +249,6 @@ if [[ "$DEERGO_ZED_ONLY" == 1 ]]; then
     install_deergo_zed
     exit 0
 fi
-
 
 # ================================================================
 # System / locale prerequisites
@@ -426,7 +433,20 @@ log "Preparing DeerGo ROS 2 workspace..."
 
 mkdir -p "${DEERGO_WS}/src"
 
-install_deergo_zed
+# CPU-only PCs can deploy navigation without an NVIDIA GPU or a ZED SDK.
+case "$DEERGO_INSTALL_ZED" in
+    0) log "Optional ZED installation skipped." ;;
+    1) install_deergo_zed ;;
+    auto)
+        if command -v nvidia-smi >/dev/null 2>&1 \
+            && nvidia-smi -L >/dev/null 2>&1; then
+            install_deergo_zed
+        else
+            warn "No working NVIDIA GPU detected; optional ZED installation skipped."
+        fi
+        ;;
+    *) die "DEERGO_INSTALL_ZED must be auto, 0 or 1." ;;
+esac
 
 
 # ================================================================
@@ -505,6 +525,10 @@ cat <<EOF
 ============================================================
 DeerGo PC environment installation completed.
 ============================================================
+
+Optional MPPI deployment (run separately from the repository root):
+
+  bash scripts/install_mppi.sh
 
 Open a new terminal, or run:
 
