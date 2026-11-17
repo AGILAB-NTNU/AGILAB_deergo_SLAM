@@ -17,7 +17,8 @@ The system integrates:
 - LaserScan EMA preprocessing from `/scan` to `/scan_sync`
 - LiDAR-only Cartographer 2D mapping and pure localization
 - Cartographer TF-to-odometry bridge publishing `/odom`
-- Nav2 autonomous navigation
+- Nav2 autonomous navigation with the default DWB controller or optional MPPI
+- Shared MPPI tuning with automatic CUDA / CPU backend selection
 - RViz2 visualization
 
 The main ROS 2 TF structure is:
@@ -141,6 +142,40 @@ git clone <repository_url> agilab_deerGO_SLAM
 cd agilab_deerGO_SLAM
 ```
 
+On a new Ubuntu 22.04 PC, install the ROS 2 Humble environment from the
+repository root before building:
+
+```bash
+bash scripts/ros2_env.sh
+```
+
+MPPI deployment is a separate, optional step. If ROS 2 Humble and the DeerGo
+base environment are already installed, skip `ros2_env.sh` and run only:
+
+```bash
+bash scripts/install_mppi.sh
+```
+
+The standalone MPPI installer checks existing dependencies and installs only
+missing packages. It does not reinstall ROS 2 Desktop, install the camera,
+configure networking, or modify `~/.bashrc`. Installation mode defaults to
+`auto`. Use `cpu` to skip CUDA deployment or `gpu` to require it:
+
+```bash
+DEERGO_MPPI_BACKEND=cpu bash scripts/install_mppi.sh
+DEERGO_MPPI_BACKEND=gpu bash scripts/install_mppi.sh
+```
+
+The MPPI installer always provides the official CPU package. With a working
+NVIDIA driver, it also fetches a pinned CUDA MPPI source revision, applies the
+version-controlled patches in `scripts/patches/`, and builds for the local GPU.
+It installs the CUDA toolkit when needed and preserves the NVIDIA driver.
+`auto` falls back to CPU if CUDA preparation fails; `gpu` reports an error
+instead. The downloaded CUDA source is Git-ignored and is recreated by the
+installer on other PCs. `ros2_env.sh` does not invoke this deployment process. Its standard
+Nav2 apt dependencies may still include the official CPU MPPI package.
+Set `DEERGO_INSTALL_ZED=0` when running `ros2_env.sh` to skip the optional camera.
+
 Enter the DeerGo ROS 2 workspace:
 
 ```bash
@@ -262,8 +297,9 @@ LiDAR's left/right direction with the robot frame. The offset is
 `x = 1.0 m`, `y = 0`, `z = 0`; `/scan_sync` preserves the incoming scan geometry
 and timestamps while applying EMA to distances.
 `base_link` is at the rear drive axle / rotation center. In `nav2_params.yaml`,
-the body extends 1.05 m forward and 0.10 m behind this origin, with 0.30 m on
-each side. Both costmaps use this footprint. The local window is 12 x 12 m;
+the footprint extends 1.00 m forward and 0.10 m behind this origin, with 0.30 m
+on each side. Both costmaps use this footprint. The local window is 8 x 8 m
+(25,600 cells at 0.05 m resolution) in the DWB and MPPI profiles;
 LiDAR obstacles are marked within 5 m and cleared by rays up to 6 m.
 
 ---
@@ -275,6 +311,8 @@ agilab_deerGO_SLAM/
 ├── assets/                     # README figures and diagrams
 ├── scripts/
 │   ├── ros2_env.sh              # Ubuntu / ROS 2 dependency setup
+│   ├── install_mppi.sh          # Standalone MPPI / optional CUDA deployment
+│   ├── patches/                # Pinned upstream compatibility and safety fixes
 │   └── deergo_connect.sh        # Network, ROS 2, and Hokuyo setup
 │
 ├── src/
@@ -433,12 +471,85 @@ ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \
 Run mapping, saving, and localization from the same workspace directory.
 `maps/` is relative to the working directory in which Cartographer is launched.
 
+### Optional MPPI Navigation
+
+The existing launch command defaults to DWB through `nav2_params.yaml`.
+The MPPI profile retains the NavFn global planner and uses Rotation Shim for
+initial path alignment.
+Install or update MPPI independently from the repository root:
+
+```bash
+bash scripts/install_mppi.sh
+```
+
+To select MPPI, run from `src/deeergo_ws` after installation:
+
+```bash
+source install/setup.bash
+
+ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \
+  load_map:=true \
+  start_nav2:=true \
+  start_mqtt:=true \
+  nav2_params_file:="$PWD/src/deergo_mqtt_bridge/config/nav2_mppi_params.yaml" \
+  mppi_backend:=auto
+```
+
+Both CPU and CUDA use the same
+[`nav2_mppi_params.yaml`](src/deeergo_ws/src/deergo_mqtt_bridge/config/nav2_mppi_params.yaml).
+At startup, `auto` checks the CUDA driver, installed plugin, shared-profile
+compatibility, and an actual CUDA kernel. It selects CUDA when those checks
+pass and otherwise uses the official CPU MPPI implementation. The launch log
+reports `Nav2 backend: gpu` or `Nav2 backend: cpu` with the selection reason.
+MPPI rollout and scoring can run on CUDA; Cartographer and costmap updates
+continue on CPU. The two backends can produce different numerical results.
+
+There is no separate CUDA tuning YAML. Both backends read the shared critic
+weights, independent goal/path switching distances, speed limits, sampling
+count, prediction horizon, and idle-reset setting. The CUDA patch also aligns
+the `gamma` regularization scale and removes its former extra obstacle and
+near-goal rotation penalties.
+
+| Shared MPPI setting | Current value |
+| --- | --- |
+| Linear velocity range | -0.30 to +0.30 m/s, including the velocity smoother |
+| MPPI angular speed limit | 0.70 rad/s in either direction |
+| Control frequency | 20 Hz |
+| Candidate trajectories | 512 |
+| Prediction horizon | 40 steps x 0.05 s = 2.0 s |
+| Linear sampling standard deviation (`vx_std`) | 0.20 m/s |
+| Local reference path length (`prune_distance`) | 1.5 m |
+| Goal tolerance | 0.20 m position; 0.20 rad heading |
+| Final-heading scoring starts | Within 0.50 m of the local path endpoint |
+| PathFollow scoring stops | Within 1.40 m of the local path endpoint |
+| Rotation Shim final-heading takeover | Disabled (`rotate_to_goal_heading: false`) |
+
+The example reads the source YAML directly, so ordinary parameter edits take
+effect after restarting launch. If `batch_size` changes, rerun
+`bash scripts/install_mppi.sh` from the repository root to rebuild the CUDA
+sampling count, then source the workspace again. In `auto` mode, a sampling-count
+mismatch or an unsupported CUDA profile selects CPU and reports the reason. Backend selection
+runs at startup; restart launch after changing the CUDA environment.
+
+For diagnosis, `mppi_backend:=cpu` forces CPU; `mppi_backend:=gpu` requires a
+working, compatible CUDA plugin and fails instead of falling back. To use
+another Nav2 YAML, replace the full path in `nav2_params_file`. Omitting the
+profile argument restores the default DWB selection.
+
+Earlier synthetic validation covered straight motion, 90-degree turns,
+final-heading alignment with repeated path updates, obstacle avoidance, and
+stopping in private ROS domains 89/90. Both backends passed those checks with
+40 shared parameters verified. Those checks do not establish real-robot
+friction response or goal accuracy.
+
 ### Nav2 Scan Receiver Queues
 
 The local voxel layer uses `deergo_nav2_plugins::QueueVoxelLayer`; the global
 obstacle layer uses `deergo_nav2_plugins::QueueObstacleLayer`. Both inherit the
-original Nav2 processing and set **DDS receive depth and TF MessageFilter
-capacity to 10** in the supplied YAML files. The system Nav2 libraries remain unchanged.
+original Nav2 processing. The default DWB and shared MPPI YAML files set
+**DDS receive depth and TF MessageFilter capacity to 5** through
+`scan_queue_size`; other profiles can choose their own value. The system Nav2
+libraries remain unchanged.
 
 Set `scan_queue_size` under the voxel and obstacle layer sections in the Nav2
 YAML files. This is an initialization setting: restart Nav2 after editing it.
@@ -808,12 +919,17 @@ ros2 topic list --no-daemon
 ros2 topic echo /scan --once --qos-reliability best_effort
 ```
 
-After changing source code or configuration, rebuild before launching:
+After changing source code or configuration loaded through installed package
+paths, rebuild before launching:
 
 ```bash
 colcon build --packages-up-to deergo_mqtt_bridge --symlink-install
 source install/setup.bash
 ```
+
+The MPPI example below reads its source YAML directly; ordinary tuning edits
+need a launch restart. Changing `batch_size` also requires rerunning
+`bash scripts/install_mppi.sh` from the repository root to rebuild CUDA.
 
 In every additional terminal, start from the directory containing
 `agilab_deerGO_SLAM` and run:
@@ -889,6 +1005,31 @@ ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \
   start_nav2:=true \
   start_mqtt:=true
 ```
+
+### Use MPPI Instead of DWB (Optional)
+
+Install MPPI once, or update it, without rerunning the ROS 2 environment installer.
+From `src/deeergo_ws`:
+
+```bash
+bash ../../scripts/install_mppi.sh
+source install/setup.bash
+```
+
+From the same prepared workspace terminal, select the shared MPPI YAML:
+
+```bash
+ros2 launch deergo_mqtt_bridge slam_rviz.launch.py \
+  load_map:=true \
+  start_nav2:=true \
+  start_mqtt:=true \
+  nav2_params_file:="$PWD/src/deergo_mqtt_bridge/config/nav2_mppi_params.yaml" \
+  mppi_backend:=auto
+```
+
+GPU / CPU selection is automatic at startup. The command without
+`nav2_params_file` continues to use DWB. See
+[Optional MPPI Navigation](#optional-mppi-navigation) for deployment and tuning.
 
 ### Enable the ZED Camera (Optional)
 

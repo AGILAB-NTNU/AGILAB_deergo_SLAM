@@ -223,6 +223,8 @@ def generate_launch_description():
 
     start_mqtt = LaunchConfiguration("start_mqtt")
 
+    nav2_params_file = LaunchConfiguration("nav2_params_file")
+
     use_sim_time = LaunchConfiguration("use_sim_time")
 
     declare_load_map = DeclareLaunchArgument(
@@ -392,6 +394,10 @@ def generate_launch_description():
 
     navigation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(navigation_launch),
+        launch_arguments={
+            "params_file": nav2_params_file,
+            "mppi_backend": LaunchConfiguration("mppi_backend"),
+        }.items(),
         condition=IfCondition(start_nav2),
     )
 
@@ -425,6 +431,14 @@ def generate_launch_description():
             declare_start_nav2,
             declare_start_mqtt,
             declare_use_sim_time,
+            DeclareLaunchArgument(
+                "nav2_params_file",
+                default_value=os.path.join(deergo_share, "config", "nav2_params.yaml"),
+                description="Nav2 profile YAML; select nav2_mppi_params.yaml for MPPI",
+            ),
+            DeclareLaunchArgument(
+                "mppi_backend", default_value="auto", choices=["auto", "cpu", "gpu"]
+            ),
             DeclareLaunchArgument(
                 "camera",
                 default_value="false",

@@ -1,0 +1,99 @@
+diff --git a/src/controller.cpp b/src/controller.cpp
+index 6df527b..6aa3240 100644
+--- a/src/controller.cpp
++++ b/src/controller.cpp
+@@ -9,2 +9,4 @@
+ #include <nav2_costmap_2d/costmap_filters/filter_values.hpp>
++#include <nav2_costmap_2d/footprint_collision_checker.hpp>
++#include <nav2_core/exceptions.hpp>
+ #include "mppi_controller_cuda/controller.hpp"
+@@ -534,2 +536,42 @@ geometry_msgs::msg::TwistStamped MPPIControllerCUDA::computeVelocityCommands(
+
++  // Validate the final optimized sequence, including polygon edges, before
++  // publishing. GPU cost sampling at footprint vertices alone can miss an edge.
++  nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *> checker(costmap);
++  const auto footprint = costmap_ros_->getRobotFootprint();
++  double radius = 0.0;
++  for (const auto & point : footprint) {
++    radius = std::max(radius, std::hypot(point.x, point.y));
++  }
++  double predicted_x = pose.pose.position.x;
++  double predicted_y = pose.pose.position.y;
++  double predicted_yaw = tf2::getYaw(pose.pose.orientation);
++  auto check_pose = [&]() {
++      const double cost = checker.footprintCostAtPose(
++        predicted_x, predicted_y, predicted_yaw, footprint);
++      if (cost < 0.0 || cost >= nav2_costmap_2d::LETHAL_OBSTACLE) {
++        throw nav2_core::PlannerException("CUDA MPPI: optimized footprint would collide");
++      }
++    };
++  check_pose();
++  const int horizon = std::min(params_->optimizer_time_steps, static_cast<int>(NUM_TIMESTEPS));
++  for (int t = 0; t < horizon; ++t) {
++    const double vx = control_sequence(C_IND_CLASS(MotionModelParams, VX), t);
++    const double vy = control_sequence(C_IND_CLASS(MotionModelParams, VY), t);
++    const double wz = control_sequence(C_IND_CLASS(MotionModelParams, WZ), t);
++    if (!std::isfinite(vx) || !std::isfinite(vy) || !std::isfinite(wz)) {
++      throw nav2_core::PlannerException("CUDA MPPI: nonfinite optimized velocity");
++    }
++    const double surface_speed = std::hypot(vx, vy) + std::abs(wz) * radius;
++    const int subdivisions = std::max(1, static_cast<int>(std::ceil(
++      surface_speed * params_->optimizer_model_dt / (costmap->getResolution() * 0.5))));
++    const double dt = params_->optimizer_model_dt / subdivisions;
++    for (int step = 0; step < subdivisions; ++step) {
++      const double midpoint_yaw = predicted_yaw + wz * dt * 0.5;
++      predicted_x += (vx * std::cos(midpoint_yaw) - vy * std::sin(midpoint_yaw)) * dt;
++      predicted_y += (vx * std::sin(midpoint_yaw) + vy * std::cos(midpoint_yaw)) * dt;
++      predicted_yaw += wz * dt;
++      check_pose();
++    }
++  }
++
+   // Warm-start the next cycle
+diff --git a/src/controller/mppi_controller.cu b/src/controller/mppi_controller.cu
+index 2671aa3..88bc094 100644
+--- a/src/controller/mppi_controller.cu
++++ b/src/controller/mppi_controller.cu
+@@ -10,2 +10,26 @@
+
++__global__ void deergo_probe_kernel(int * value)
++{
++  *value = 571;
++}
++
++// Startup detection runs this in an isolated subprocess. No ROS nodes or
++// vehicle commands are created; the installed plugin's CUDA code is exercised.
++extern "C" int deergo_mppi_cuda_probe()
++{
++  int * device = nullptr;
++  int value = 0;
++  cudaError_t status = cudaMalloc(reinterpret_cast<void **>(&device), sizeof(int));
++  if (status != cudaSuccess) {return static_cast<int>(status);}
++  deergo_probe_kernel<<<1, 1>>>(device);
++  status = cudaGetLastError();
++  if (status == cudaSuccess) {status = cudaDeviceSynchronize();}
++  if (status == cudaSuccess) {
++    status = cudaMemcpy(&value, device, sizeof(int), cudaMemcpyDeviceToHost);
++  }
++  cudaFree(device);
++  if (status != cudaSuccess) {return static_cast<int>(status);}
++  return value == 571 ? 0 : static_cast<int>(cudaErrorUnknown);
++}
++
+ __global__ void print_from_gpu(void) {
+@@ -451,2 +475,6 @@ void CONTROLLER::computeControl(const Eigen::Ref<const state_array>& state, int
+       this->setNormalizer(mppi::kernels::computeNormalizer(this->trajectory_costs_.data(), NUM_ROLLOUTS));
++      if (!std::isfinite(this->getNormalizerCost()) || this->getNormalizerCost() <= 0.0f)
++      {
++        throw std::runtime_error("CUDA MPPI: nonfinite or zero sample normalizer");
++      }
+
+@@ -480,6 +508,4 @@ void CONTROLLER::computeControl(const Eigen::Ref<const state_array>& state, int
+   {
+-    this->logger_->error(
+-        "computeControl(): every sampled rollout still predicts collision after %d retries -- proceeding with "
+-        "best-effort control.\n",
+-        this->retry_attempt_limit_);
++    this->updateImportanceSampler(control_trajectory::Zero());
++    throw std::runtime_error("CUDA MPPI: no collision-free sampled trajectory");
+   }

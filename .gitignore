@@ -65,6 +65,8 @@ log/
 docs/maps/
 # Installed by scripts/ros2_env.sh at a pinned upstream release.
 src/deeergo_ws/src/zed-ros2-wrapper/
+# Optional CUDA MPPI source is fetched at a fixed revision by ros2_env.sh.
+src/deeergo_ws/src/mppi_controller_cuda/
 
 
 # 4. 資料與模型 (保留目錄結構，忽略內部資料)

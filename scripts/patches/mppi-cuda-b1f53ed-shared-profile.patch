@@ -1,0 +1,685 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -7,2 +7,5 @@
+ project(mppi_controller_cuda LANGUAGES CXX CUDA)
++
++set(DEERGO_MPPI_BATCH_SIZE 512 CACHE STRING "Rollouts from the shared MPPI YAML")
++add_compile_definitions(DEERGO_MPPI_BATCH_SIZE=${DEERGO_MPPI_BATCH_SIZE})
+
+@@ -77,2 +80,5 @@
+ )
++
++target_compile_definitions(mppi_controller_cuda PRIVATE
++  MPPI_NUM_ROLLOUTS=${DEERGO_MPPI_BATCH_SIZE})
+
+diff --git a/include/mppi_controller_cuda/controller.hpp b/include/mppi_controller_cuda/controller.hpp
+--- a/include/mppi_controller_cuda/controller.hpp
++++ b/include/mppi_controller_cuda/controller.hpp
+@@ -33,3 +33,3 @@
+   static constexpr int NUM_TIMESTEPS = 100;
+-  static constexpr int NUM_ROLLOUTS = 2048;
++  static constexpr int NUM_ROLLOUTS = DEERGO_MPPI_BATCH_SIZE;
+   using DYN_T = MotionModel;
+@@ -164,2 +164,3 @@
+   bool noise_generated_once_ = false;
++  int64_t last_compute_stamp_ns_ = 0;
+
+diff --git a/include/mppi_controller_cuda/costs/motion_model_cost.cuh b/include/mppi_controller_cuda/costs/motion_model_cost.cuh
+--- a/include/mppi_controller_cuda/costs/motion_model_cost.cuh
++++ b/include/mppi_controller_cuda/costs/motion_model_cost.cuh
+@@ -24,2 +24,5 @@
+   bool near_goal = false;
++  bool goal_angle_near_goal = false;
++  bool path_follow_near_goal = false;
++  bool twirling_near_goal = false;
+   float goal_x = 0.0f;
+@@ -79,4 +82,6 @@
+   int mppi_num_timesteps = 1;
++  float prediction_duration = 1.0f;
+   bool path_align_near_goal = false;
+   int path_align_offset_from_furthest = 0;
++  int path_align_trajectory_point_step = 4;
+   float path_align_weight = 0.0f;
+diff --git a/include/mppi_controller_cuda/tools/parameters_handler.hpp b/include/mppi_controller_cuda/tools/parameters_handler.hpp
+--- a/include/mppi_controller_cuda/tools/parameters_handler.hpp
++++ b/include/mppi_controller_cuda/tools/parameters_handler.hpp
+@@ -21,2 +21,14 @@
+ {
++  std::vector<std::string> critics;
++  bool constraint_enabled;
++  bool cost_enabled;
++  bool goal_enabled;
++  bool goal_angle_enabled;
++  bool path_align_enabled;
++  bool path_follow_enabled;
++  bool path_angle_enabled;
++  bool prefer_forward_enabled;
++  bool twirling_enabled;
++  int batch_size;
++  double reset_period;
+   float vx_max;
+@@ -48,2 +60,3 @@
+   float goal_angle_cost_weight;
++  float goal_angle_threshold_to_consider;
+
+@@ -76,2 +89,3 @@
+   int path_align_offset_from_furthest;
++  int path_align_trajectory_point_step;
+   float path_align_max_path_occupancy_ratio;
+@@ -90,2 +104,3 @@
+   float path_follow_cost_weight;
++  float path_follow_threshold_to_consider;
+
+diff --git a/src/controller.cpp b/src/controller.cpp
+--- a/src/controller.cpp
++++ b/src/controller.cpp
+@@ -16,2 +16,8 @@
+
++extern "C" int deergo_mppi_profile_abi() {return 1;}
++extern "C" int deergo_mppi_batch_size()
++{
++  return mppi_controller_cuda::MPPIControllerCUDA::NUM_ROLLOUTS;
++}
++
+ namespace mppi_controller_cuda
+@@ -38,2 +44,8 @@
+     params_ = parameters_handler_->getParams();
++    if (params_->batch_size != NUM_ROLLOUTS || params_->optimizer_time_steps < 1 ||
++      params_->optimizer_time_steps > NUM_TIMESTEPS)
++    {
++      throw std::runtime_error("CUDA MPPI sampling shape differs from the shared profile; rebuild");
++    }
++
+
+@@ -159,9 +171,10 @@
+ {
+-  cost_params.goal_weight = params_->goal_cost_weight;
++  cost_params.prediction_duration = params_->optimizer_model_dt * params_->optimizer_time_steps;
++  cost_params.goal_weight = params_->goal_enabled ? params_->goal_cost_weight : 0.0f;
+   cost_params.goal_power = params_->goal_cost_power;
+-  cost_params.goal_angle_weight = params_->goal_angle_cost_weight;
++  cost_params.goal_angle_weight = params_->goal_angle_enabled ? params_->goal_angle_cost_weight : 0.0f;
+   cost_params.goal_angle_power = params_->goal_angle_cost_power;
+-  cost_params.prefer_forward_weight = params_->prefer_forward_cost_weight;
++  cost_params.prefer_forward_weight = params_->prefer_forward_enabled ? params_->prefer_forward_cost_weight : 0.0f;
+   cost_params.prefer_forward_power = params_->prefer_forward_cost_power;
+-  cost_params.twirling_weight = params_->twirling_cost_weight;
++  cost_params.twirling_weight = params_->twirling_enabled ? params_->twirling_cost_weight : 0.0f;
+   cost_params.twirling_power = params_->twirling_cost_power;
+@@ -174,3 +187,3 @@
+   cost_params.deadband_wz = params_->velocity_deadband_velocities_3;
+-  cost_params.constraint_weight = params_->constrain_cost_weight;
++  cost_params.constraint_weight = params_->constraint_enabled ? params_->constrain_cost_weight : 0.0f;
+   cost_params.constraint_power = params_->constrain_cost_power;
+@@ -187,3 +200,3 @@
+   cost_params.obstacle_power = params_->obstacles_cost_power;
+-  cost_params.cost_weight = params_->cost_weight;
++  cost_params.cost_weight = params_->cost_enabled ? params_->cost_weight / 254.0f : 0.0f;
+   cost_params.cost_power = params_->cost_power;
+@@ -192,5 +205,6 @@
+   cost_params.path_align_offset_from_furthest = params_->path_align_offset_from_furthest;
+-  cost_params.path_align_weight = params_->path_align_cost_weight;
++  cost_params.path_align_trajectory_point_step = params_->path_align_trajectory_point_step;
++  cost_params.path_align_weight = params_->path_align_enabled ? params_->path_align_cost_weight : 0.0f;
+   cost_params.path_align_power = params_->path_align_cost_power;
+-  cost_params.path_angle_weight = params_->path_angle_cost_weight;
++  cost_params.path_angle_weight = params_->path_angle_enabled ? params_->path_angle_cost_weight : 0.0f;
+   cost_params.path_angle_power = params_->path_angle_cost_power;
+@@ -213,3 +227,6 @@
+
+-  const float control_cost_coeff = -params_->optimizer_gamma / params_->optimizer_temperature;
++  // CUDA averages running costs over the horizon; native MPPI sums this
++  // regularizer. Compensate here so the same gamma has the same meaning.
++  const float control_cost_coeff = -params_->optimizer_gamma * params_->optimizer_time_steps /
++    params_->optimizer_temperature;
+   sampler_params.control_cost_coeff[C_IND_CLASS(MotionModelParams, VX)] = control_cost_coeff;
+@@ -316,3 +333,3 @@
+   const geometry_msgs::msg::Twist& velocity,
+-  nav2_core::GoalChecker* /*goal_checker*/)
++  nav2_core::GoalChecker* goal_checker)
+ {
+@@ -323,3 +340,11 @@
+   std::lock_guard<std::mutex> param_lock(*parameters_handler_->getLock());
+-  geometry_msgs::msg::Pose goal = path_handler_.getTransformedGoal(pose.header.stamp).pose;
++  const auto stamp_ns = clock_->now().nanoseconds();
++  if (last_compute_stamp_ns_ != 0 &&
++    (stamp_ns - last_compute_stamp_ns_) * 1e-9 > params_->reset_period)
++  {
++    mppi_controller_->updateImportanceSampler(CONTROLLER_T::control_trajectory::Zero());
++    noise_generated_once_ = false;
++    last_true_furthest_reached_idx_ = 0;
++  }
++  last_compute_stamp_ns_ = stamp_ns;
+   nav2_costmap_2d::Costmap2D * costmap = costmap_ros_->getCostmap();
+@@ -327,2 +352,5 @@
+   nav_msgs::msg::Path transformed_plan = path_handler_.transformPath(pose);
++  // Native MPPI evaluates the end of its local/pruned path on both backends.
++  const auto & goal = transformed_plan.poses.back().pose;
++
+   const geometry_msgs::msg::Twist & speed = velocity;
+@@ -370,3 +398,3 @@
+   cost_params.path_length = path_length;
+-  cost_params.path_follow_weight = params_->path_follow_cost_weight;
++  cost_params.path_follow_weight = params_->path_follow_enabled ? params_->path_follow_cost_weight : 0.0f;
+   cost_params.path_follow_power = params_->path_follow_cost_power;
+@@ -387,2 +415,10 @@
+   const bool near_goal = dist_to_goal < params_->goal_threshold_to_consider;
++  const bool goal_angle_near_goal = dist_to_goal < params_->goal_angle_threshold_to_consider;
++  const bool path_follow_near_goal = dist_to_goal < params_->path_follow_threshold_to_consider;
++  geometry_msgs::msg::Pose pose_tolerance;
++  geometry_msgs::msg::Twist velocity_tolerance;
++  const bool twirling_near_goal = goal_checker &&
++    goal_checker->getTolerances(pose_tolerance, velocity_tolerance) &&
++    dist_to_goal < pose_tolerance.position.x;
++
+   const bool path_align_near_goal = dist_to_goal < params_->path_align_threshold_to_consider;
+@@ -486,2 +522,5 @@
+   cost_params.near_goal = near_goal;
++  cost_params.goal_angle_near_goal = goal_angle_near_goal;
++  cost_params.path_follow_near_goal = path_follow_near_goal;
++  cost_params.twirling_near_goal = twirling_near_goal;
+   cost_params.path_align_near_goal = path_align_near_goal;
+diff --git a/src/costs/motion_model_cost.cu b/src/costs/motion_model_cost.cu
+--- a/src/costs/motion_model_cost.cu
++++ b/src/costs/motion_model_cost.cu
+@@ -83,2 +83,3 @@
+   float tex_val = this->obstacle_tex_->queryTextureAtWorldPose(0, make_float3(x, yy, 0.0f));
++  const float center_cost = tex_val;
+   if (this->params_.footprint_length > 0)
+@@ -107,3 +108,3 @@
+   // inside this cell, same as costmap_2d::LETHAL_OBSTACLE == 254.
+-  if (tex_val >= 253.0f || *crash_status)
++  if (tex_val >= (this->params_.footprint_length > 0 ? 254.0f : 253.0f) || *crash_status)
+   {
+@@ -112,23 +113,6 @@
+   }
+-  float dist_to_obj = (logf(252.0f) - logf(tex_val)) / this->params_.obstacle_scale_factor;
+-  float cost = 0.0f;
+-  if (dist_to_obj < this->params_.obstacle_collision_margin)
+-  {
+-    cost = this->params_.obstacle_traj_weight * (this->params_.obstacle_collision_margin - dist_to_obj);
+-  }
+-  else if (!this->params_.obstacles_near_goal)
+-  {
+-    cost = this->params_.obstacle_repulsion_weight * (this->params_.obstacle_inflation_radius - dist_to_obj);
+-  }
+-  cost = fmaxf(cost, 0.0f);
+-  cost = this->params_.obstacle_power > 1 ? powf(cost, this->params_.obstacle_power) : cost;
+-
+-  float cost_critic_cost = 0.0f;
+-  if (!this->params_.obstacles_near_goal)
+-  {
+-    cost_critic_cost = this->params_.cost_weight * tex_val;
+-  }
+-  cost_critic_cost = this->params_.cost_power > 1 ? powf(cost_critic_cost, this->params_.cost_power) : cost_critic_cost;
+-
+-  return cost + cost_critic_cost;
++  if (center_cost >= 253.0f) {
++    return this->params_.cost_weight * this->params_.cost_critical_cost;
++  }
++  return this->params_.obstacles_near_goal ? 0.0f : this->params_.cost_weight * center_cost;
+ }
+@@ -148,3 +132,3 @@
+
+-  if (this->params_.near_goal)
++  if (this->params_.goal_angle_near_goal)
+   {
+@@ -159,3 +143,6 @@
+   // Path-align
++  const int align_step = this->params_.path_align_trajectory_point_step;
++  const int align_samples = align_step > 0 ? (this->params_.mppi_num_timesteps - 1) / align_step : 0;
+   if (this->params_.path_align_weight > 0.0f && !this->params_.path_align_near_goal &&
++      align_samples > 0 && timestep > 0 && timestep % align_step == 0 &&
+       this->params_.furthest_reached_idx >= this->params_.path_align_offset_from_furthest)
+@@ -170,3 +157,4 @@
+       float dist = sqrtf(dx * dx + dy * dy);
+-      cost += this->params_.path_align_weight *
++      cost += this->params_.mppi_num_timesteps / static_cast<float>(align_samples) *
++              this->params_.path_align_weight *
+               (this->params_.path_align_power > 1 ? powf(dist, this->params_.path_align_power) : dist);
+@@ -175,18 +163,2 @@
+
+-  return cost;
+-}
+-
+-float MotionModelCost::terminalCost(const Eigen::Ref<const output_array> y)
+-{
+-  float cost = 0;
+-  // Path-follow
+-  if (this->params_.path_follow_weight > 0.0f && !this->params_.near_goal)
+-  {
+-    float dx = this->params_.path_follow_target_x - y[O_IND_CLASS(DYN_P, X)];
+-    float dy = this->params_.path_follow_target_y - y[O_IND_CLASS(DYN_P, Y)];
+-    float dist = sqrtf(dx * dx + dy * dy);
+-    cost += this->params_.path_follow_weight *
+-            (this->params_.path_follow_power > 1 ? powf(dist, this->params_.path_follow_power) : dist);
+-  }
+-  // Path-angle
+   if (this->params_.path_angle_weight > 0.0f && this->params_.path_angle_active && !this->params_.path_angle_near_goal)
+@@ -203,2 +175,17 @@
+
++float MotionModelCost::terminalCost(const Eigen::Ref<const output_array> y)
++{
++  float cost = 0;
++  // Path-follow
++  if (this->params_.path_follow_weight > 0.0f && !this->params_.path_follow_near_goal)
++  {
++    float dx = this->params_.path_follow_target_x - y[O_IND_CLASS(DYN_P, X)];
++    float dy = this->params_.path_follow_target_y - y[O_IND_CLASS(DYN_P, Y)];
++    float dist = sqrtf(dx * dx + dy * dy);
++    cost += this->params_.path_follow_weight *
++            (this->params_.path_follow_power > 1 ? powf(dist, this->params_.path_follow_power) : dist);
++  }
++  return cost;
++}
++
+ float MotionModelCost::computeControlCost(const Eigen::Ref<const control_array> u, int timestep, int* crash)
+@@ -214,15 +201,10 @@
+     float reverse = fmaxf(-vx, 0.0f);
+-    cost += this->params_.prefer_forward_weight *
++    cost += this->params_.prediction_duration * this->params_.prefer_forward_weight *
+             (this->params_.prefer_forward_power > 1 ? powf(reverse, this->params_.prefer_forward_power) : reverse);
+
+-    float wz_abs = fabsf(wz);
+-    cost += this->params_.twirling_weight *
+-            (this->params_.twirling_power > 1 ? powf(wz_abs, this->params_.twirling_power) : wz_abs);
+-  }
+-  else
+-  {
+-    float wz_abs = fabsf(wz);
+-    cost += this->params_.near_goal_twirling_weight *
+-            (this->params_.near_goal_twirling_power > 1 ? powf(wz_abs, this->params_.near_goal_twirling_power) :
+-                                                           wz_abs);
++  }
++  if (!this->params_.twirling_near_goal)
++  {
++    const float wz_abs = fabsf(wz);
++    cost += this->params_.twirling_weight * wz_abs;
+   }
+@@ -256,3 +238,3 @@
+   }
+-  cost += this->params_.constraint_weight *
++  cost += this->params_.prediction_duration * this->params_.constraint_weight *
+           (this->params_.constraint_power > 1 ? powf(over, this->params_.constraint_power) : over);
+@@ -276,3 +258,3 @@
+   // Goal angle
+-  if (this->params_.near_goal)
++  if (this->params_.goal_angle_near_goal)
+   {
+@@ -285,3 +267,6 @@
+
++  const int align_step = this->params_.path_align_trajectory_point_step;
++  const int align_samples = align_step > 0 ? (this->params_.mppi_num_timesteps - 1) / align_step : 0;
+   if (this->params_.path_align_weight > 0.0f && !this->params_.path_align_near_goal &&
++      align_samples > 0 && timestep > 0 && timestep % align_step == 0 &&
+       this->params_.furthest_reached_idx >= this->params_.path_align_offset_from_furthest)
+@@ -297,3 +282,4 @@
+       // No manual division -- see the host overload's matching comment.
+-      cost += this->params_.path_align_weight *
++      cost += this->params_.mppi_num_timesteps / static_cast<float>(align_samples) *
++              this->params_.path_align_weight *
+               (this->params_.path_align_power > 1 ? powf(dist, this->params_.path_align_power) : dist);
+@@ -302,16 +288,2 @@
+
+-  return cost;
+-}
+-
+-__device__ float MotionModelCost::terminalCost(float* y, float* theta_c)
+-{
+-  float cost = 0;
+-  if (this->params_.path_follow_weight > 0.0f && !this->params_.near_goal)
+-  {
+-    float dx = this->params_.path_follow_target_x - y[O_IND_CLASS(DYN_P, X)];
+-    float dy = this->params_.path_follow_target_y - y[O_IND_CLASS(DYN_P, Y)];
+-    float dist = sqrtf(dx * dx + dy * dy);
+-    cost += this->params_.path_follow_weight *
+-            (this->params_.path_follow_power > 1 ? powf(dist, this->params_.path_follow_power) : dist);
+-  }
+   if (this->params_.path_angle_weight > 0.0f && this->params_.path_angle_active && !this->params_.path_angle_near_goal)
+@@ -328,2 +300,16 @@
+
++__device__ float MotionModelCost::terminalCost(float* y, float* theta_c)
++{
++  float cost = 0;
++  if (this->params_.path_follow_weight > 0.0f && !this->params_.path_follow_near_goal)
++  {
++    float dx = this->params_.path_follow_target_x - y[O_IND_CLASS(DYN_P, X)];
++    float dy = this->params_.path_follow_target_y - y[O_IND_CLASS(DYN_P, Y)];
++    float dist = sqrtf(dx * dx + dy * dy);
++    cost += this->params_.path_follow_weight *
++            (this->params_.path_follow_power > 1 ? powf(dist, this->params_.path_follow_power) : dist);
++  }
++  return cost;
++}
++
+ __device__ float MotionModelCost::computeControlCost(float* u, int timestep, float* theta_c, int* crash)
+@@ -339,15 +325,10 @@
+     float reverse = fmaxf(-vx, 0.0f);
+-    cost += this->params_.prefer_forward_weight *
++    cost += this->params_.prediction_duration * this->params_.prefer_forward_weight *
+             (this->params_.prefer_forward_power > 1 ? powf(reverse, this->params_.prefer_forward_power) : reverse);
+
+-    float wz_abs = fabsf(wz);
+-    cost += this->params_.twirling_weight *
+-            (this->params_.twirling_power > 1 ? powf(wz_abs, this->params_.twirling_power) : wz_abs);
+-  }
+-  else
+-  {
+-    float wz_abs = fabsf(wz);
+-    cost += this->params_.near_goal_twirling_weight *
+-            (this->params_.near_goal_twirling_power > 1 ? powf(wz_abs, this->params_.near_goal_twirling_power) :
+-                                                           wz_abs);
++  }
++  if (!this->params_.twirling_near_goal)
++  {
++    const float wz_abs = fabsf(wz);
++    cost += this->params_.twirling_weight * wz_abs;
+   }
+@@ -379,3 +360,3 @@
+   }
+-  cost += this->params_.constraint_weight *
++  cost += this->params_.prediction_duration * this->params_.constraint_weight *
+           (this->params_.constraint_power > 1 ? powf(over, this->params_.constraint_power) : over);
+diff --git a/src/sampling_distribution/gaussian.cu b/src/sampling_distribution/gaussian.cu
+--- a/src/sampling_distribution/gaussian.cu
++++ b/src/sampling_distribution/gaussian.cu
+@@ -891,3 +891,5 @@
+       }
+-      cost += control_cost_coeff[i] * mean_i * (mean_i - 2.0f * u[i]) / (std_dev[i] * std_dev[i]);  // Proper way
++      if (std_dev[i] > 0.0f) {
++        cost += control_cost_coeff[i] * mean_i * (mean_i - 2.0f * u[i]) / (std_dev[i] * std_dev[i]);
++      }
+     }
+@@ -951,3 +953,5 @@
+     {
+-      cost += control_cost_coeff[i] * (u_fb[i] * u_fb[i]) / (std_dev[i] * std_dev[i]);
++      if (std_dev[i] > 0.0f) {
++        cost += control_cost_coeff[i] * (u_fb[i] * u_fb[i]) / (std_dev[i] * std_dev[i]);
++      }
+     }
+@@ -973,2 +977,3 @@
+   {
++    if (std_dev[i] <= 0.0f) {continue;}
+     cost += this->params_.control_cost_coeff[i] * mean[i] * (mean[i] + 2.0f * u(i)) /
+diff --git a/src/tools/parameters_handler.cpp b/src/tools/parameters_handler.cpp
+--- a/src/tools/parameters_handler.cpp
++++ b/src/tools/parameters_handler.cpp
+@@ -1,2 +1,4 @@
+ #include "mppi_controller_cuda/tools/parameters_handler.hpp"
++#include <algorithm>
++#include <limits>
+
+@@ -71,7 +73,23 @@
+ {
++  // The ROS-facing schema is the native Humble MPPI schema on both backends.
+   auto getParam = getParamGetter(plugin_name_);
++  getParam(params_.critics, "critics", std::vector<std::string>{}, ParameterType::Static);
++  auto enabled = [&](bool & setting, const std::string & critic) {
++      getParam(setting, critic + ".enabled", true, ParameterType::Static);
++      setting = setting && std::find(params_.critics.begin(), params_.critics.end(), critic)
++        != params_.critics.end();
++    };
++  enabled(params_.constraint_enabled, "ConstraintCritic");
++  enabled(params_.cost_enabled, "CostCritic");
++  enabled(params_.goal_enabled, "GoalCritic");
++  enabled(params_.goal_angle_enabled, "GoalAngleCritic");
++  enabled(params_.path_align_enabled, "PathAlignCritic");
++  enabled(params_.path_follow_enabled, "PathFollowCritic");
++  enabled(params_.path_angle_enabled, "PathAngleCritic");
++  enabled(params_.prefer_forward_enabled, "PreferForwardCritic");
++  enabled(params_.twirling_enabled, "TwirlingCritic");
+
+   getParam(params_.vx_max, "vx_max", 0.5f);
++  getParam(params_.vx_min, "vx_min", -0.35f);
+   getParam(params_.vy_max, "vy_max", 0.0f);
+-  getParam(params_.vx_min, "vx_min", -0.35f);
+   getParam(params_.vx_std, "vx_std", 0.2f);
+@@ -79,155 +97,99 @@
+   getParam(params_.wz_std, "wz_std", 0.4f);
+-  getParam(params_.optimizer_gamma, "optimizer_gamma", 0.015f);
+-  getParam(
+-    params_.pure_noise_trajectories_percentage,
+-    "pure_noise_trajectories_percentage", 0.0f);
+-  getParam(params_.vx_noise_color_exponent, "vx_noise_color_exponent", 0.0f);
+-  getParam(params_.vy_noise_color_exponent, "vy_noise_color_exponent", 0.0f);
+-  getParam(params_.wz_noise_color_exponent, "wz_noise_color_exponent", 1.0f);
+-  getParam(params_.ax_max, "ax_max", 3.0f);
+-  getParam(params_.ax_min, "ax_min", -3.0f);
+-  getParam(params_.ay_max, "ay_max", 3.0f);
+-  getParam(params_.az_max, "az_max", 3.5f);
++  getParam(params_.wz_max, "wz_max", 1.9f, ParameterType::Static);
++  getParam(params_.optimizer_gamma, "gamma", 0.015f);
++  getParam(params_.reset_period, "reset_period", 1.0);
++  getParam(params_.batch_size, "batch_size", 1000, ParameterType::Static);
++  getParam(params_.ackermann_constraints_min_turning_r,
++    "AckermannConstraints.min_turning_r", 0.2f, ParameterType::Static);
+
+-  // Static controller parameters
+-  getParam(params_.wz_max, "wz_max", 1.9f, ParameterType::Static);
+-  getParam(
+-    params_.ackermann_constraints_min_turning_r,
+-    "ackermann_constraints_min_turning_r", 0.2f, ParameterType::Static);
++  // Humble's CPU rollout has no acceleration limiter; the common velocity
++  // smoother applies the configured acceleration limits after either backend.
++  params_.ax_max = params_.ay_max = params_.az_max = std::numeric_limits<float>::max();
++  params_.ax_min = -params_.ax_max;
++  params_.pure_noise_trajectories_percentage = 0.0f;
++  params_.noise_generator_use_colored_noise = false;
++  params_.vx_noise_color_exponent = params_.vy_noise_color_exponent =
++    params_.wz_noise_color_exponent = 0.0f;
+
+-  // Constrain critic parameters
+-  getParam(params_.constrain_cost_power, "constrain_cost_power", 1);
+-  getParam(params_.constrain_cost_weight, "constrain_cost_weight", 4.0f);
++  getParam(params_.constrain_cost_power, "ConstraintCritic.cost_power", 1);
++  getParam(params_.constrain_cost_weight, "ConstraintCritic.cost_weight", 4.0f);
++  getParam(params_.goal_cost_power, "GoalCritic.cost_power", 1);
++  getParam(params_.goal_cost_weight, "GoalCritic.cost_weight", 5.0f);
++  getParam(params_.goal_threshold_to_consider, "GoalCritic.threshold_to_consider", 1.4f);
++  getParam(params_.goal_angle_cost_power, "GoalAngleCritic.cost_power", 1);
++  getParam(params_.goal_angle_cost_weight, "GoalAngleCritic.cost_weight", 3.0f);
++  getParam(params_.goal_angle_threshold_to_consider,
++    "GoalAngleCritic.threshold_to_consider", 0.5f);
+
+-  // Goal angle critic parameters
+-  getParam(params_.goal_angle_cost_power, "goal_angle_cost_power", 1);
+-  getParam(params_.goal_angle_cost_weight, "goal_angle_cost_weight", 3.0f);
++  getParam(params_.path_align_threshold_to_consider,
++    "PathAlignCritic.threshold_to_consider", 0.5f);
++  getParam(params_.path_align_offset_from_furthest,
++    "PathAlignCritic.offset_from_furthest", 20);
++  getParam(params_.path_align_trajectory_point_step,
++    "PathAlignCritic.trajectory_point_step", 4, ParameterType::Static);
++  getParam(params_.path_align_max_path_occupancy_ratio,
++    "PathAlignCritic.max_path_occupancy_ratio", 0.07f);
++  getParam(params_.path_align_cost_power, "PathAlignCritic.cost_power", 1);
++  getParam(params_.path_align_cost_weight, "PathAlignCritic.cost_weight", 10.0f);
++  getParam(params_.path_angle_threshold_to_consider,
++    "PathAngleCritic.threshold_to_consider", 0.5f);
++  getParam(params_.path_angle_offset_from_furthest, "PathAngleCritic.offset_from_furthest", 4);
++  getParam(params_.path_angle_cost_power, "PathAngleCritic.cost_power", 1);
++  getParam(params_.path_angle_cost_weight, "PathAngleCritic.cost_weight", 2.0f);
++  getParam(params_.path_angle_max_angle_to_furthest,
++    "PathAngleCritic.max_angle_to_furthest", 1.2f);
++  getParam(params_.path_follow_threshold_to_consider,
++    "PathFollowCritic.threshold_to_consider", 1.4f);
++  getParam(params_.path_follow_offset_from_furthest, "PathFollowCritic.offset_from_furthest", 6);
++  getParam(params_.path_follow_cost_power, "PathFollowCritic.cost_power", 1);
++  getParam(params_.path_follow_cost_weight, "PathFollowCritic.cost_weight", 5.0f);
++  getParam(params_.prefer_forward_threshold_to_consider,
++    "PreferForwardCritic.threshold_to_consider", 0.5f);
++  getParam(params_.prefer_forward_cost_power, "PreferForwardCritic.cost_power", 1);
++  getParam(params_.prefer_forward_cost_weight, "PreferForwardCritic.cost_weight", 5.0f);
++  getParam(params_.twirling_cost_power, "TwirlingCritic.cost_power", 1);
++  getParam(params_.twirling_cost_weight, "TwirlingCritic.cost_weight", 10.0f);
++  params_.near_goal_twirling_cost_power = 1;
++  params_.near_goal_twirling_cost_weight = 0.0f;
+
+-  // Goal critic parameters
+-  getParam(params_.goal_cost_power, "goal_cost_power", 1);
+-  getParam(params_.goal_cost_weight, "goal_cost_weight", 5.0f);
+-  getParam(params_.goal_threshold_to_consider, "goal_threshold_to_consider", 1.4f);
+-  getParam(
+-    params_.path_align_threshold_to_consider,
+-    "path_align_threshold_to_consider", 0.5f);
+-  getParam(
+-    params_.path_angle_threshold_to_consider,
+-    "path_angle_threshold_to_consider", 0.5f);
+-  getParam(
+-    params_.prefer_forward_threshold_to_consider,
+-    "prefer_forward_threshold_to_consider", 0.5f);
++  getParam(params_.obstacles_consider_footprint, "CostCritic.consider_footprint", false);
++  getParam(params_.cost_power, "CostCritic.cost_power", 1);
++  getParam(params_.cost_weight, "CostCritic.cost_weight", 3.81f);
++  getParam(params_.cost_critical_cost, "CostCritic.critical_cost", 300.0f);
++  getParam(params_.cost_collision_cost, "CostCritic.collision_cost", 1000000.0f);
++  getParam(params_.obstacles_near_goal_distance, "CostCritic.near_goal_distance", 0.5f);
++  // No hidden ObstaclesCritic or VelocityDeadbandCritic beyond the shared list.
++  params_.obstacles_cost_power = 1;
++  params_.obstacles_repulsion_weight = params_.obstacles_critical_weight = 0.0f;
++  params_.obstacles_collision_cost = params_.obstacles_collision_margin_distance = 0.0f;
++  params_.obstacles_inflation_scale_factor = 1.0f;
++  params_.obstacles_inflation_radius = 0.0f;
++  params_.velocity_deadband_cost_power = 1;
++  params_.velocity_deadband_cost_weight = 0.0f;
++  params_.velocity_deadband_velocities_1 = params_.velocity_deadband_velocities_2 =
++    params_.velocity_deadband_velocities_3 = 0.0;
+
+-  // Obstacles critic parameters
+-  getParam(params_.obstacles_consider_footprint, "obstacles_consider_footprint", false);
+-  getParam(params_.obstacles_cost_power, "obstacles_cost_power", 1);
+-  getParam(params_.obstacles_repulsion_weight, "obstacles_repulsion_weight", 1.5f);
+-  getParam(params_.obstacles_critical_weight, "obstacles_critical_weight", 20.0f);
+-  getParam(params_.obstacles_collision_cost, "obstacles_collision_cost", 100000.0f);
+-  getParam(
+-    params_.obstacles_collision_margin_distance,
+-    "obstacles_collision_margin_distance", 0.20f);
+-  getParam(params_.obstacles_near_goal_distance, "obstacles_near_goal_distance", 0.5f);
+-  getParam(
+-    params_.obstacles_inflation_radius, "obstacles_inflation_radius", 0.5f,
+-    ParameterType::Static);
+-  getParam(
+-    params_.obstacles_inflation_scale_factor, "obstacles_inflation_scale_factor", 1.0f,
+-    ParameterType::Static);
+-
+-  // Cost critic parameters
+-  getParam(params_.cost_power, "cost_power", 1);
+-  getParam(params_.cost_weight, "cost_weight", 0.0f);
+-  getParam(params_.cost_critical_cost, "cost_critical_cost", 300.0f);
+-  getParam(params_.cost_collision_cost, "cost_collision_cost", 1000000.0f);
+-
+-  // Path align critic parameters
+-  getParam(params_.path_align_offset_from_furthest, "path_align_offset_from_furthest", 20);
+-  getParam(
+-    params_.path_align_max_path_occupancy_ratio,
+-    "path_align_max_path_occupancy_ratio", 0.07f);
+-  getParam(params_.path_align_cost_power, "path_align_cost_power", 1);
+-  getParam(params_.path_align_cost_weight, "path_align_cost_weight", 10.0f);
+-
+-  // Path angle critic parameters
+-  getParam(params_.path_angle_offset_from_furthest, "path_angle_offset_from_furthest", 4);
+-  getParam(params_.path_angle_cost_power, "path_angle_cost_power", 1);
+-  getParam(params_.path_angle_cost_weight, "path_angle_cost_weight", 2.2f);
+-  getParam(
+-    params_.path_angle_max_angle_to_furthest,
+-    "path_angle_max_angle_to_furthest", 0.785398f);
+-
+-  // Path follow critic parameters
+-  getParam(params_.path_follow_offset_from_furthest, "path_follow_offset_from_furthest", 6);
+-  getParam(params_.path_follow_cost_power, "path_follow_cost_power", 1);
+-  getParam(params_.path_follow_cost_weight, "path_follow_cost_weight", 5.0f);
+-
+-  // Prefer forward / twirling critic parameters
+-  getParam(params_.prefer_forward_cost_power, "prefer_forward_cost_power", 1);
+-  getParam(params_.prefer_forward_cost_weight, "prefer_forward_cost_weight", 0.3f);
+-
+-  getParam(params_.twirling_cost_power, "twirling_cost_power", 1);
+-  getParam(params_.twirling_cost_weight, "twirling_cost_weight", 0.0f);
+-  getParam(params_.near_goal_twirling_cost_power, "near_goal_twirling_cost_power", 1);
+-  getParam(params_.near_goal_twirling_cost_weight, "near_goal_twirling_cost_weight", 0.5f);
+-
+-  // Velocity deadband critic parameters
+-  getParam(params_.velocity_deadband_cost_power, "velocity_deadband_cost_power", 1);
+-  getParam(params_.velocity_deadband_cost_weight, "velocity_deadband_cost_weight", 35.0f);
+-  getParam(params_.velocity_deadband_velocities_1, "velocity_deadband_velocities_1", 0.0);
+-  getParam(params_.velocity_deadband_velocities_2, "velocity_deadband_velocities_2", 0.0);
+-  getParam(params_.velocity_deadband_velocities_3, "velocity_deadband_velocities_3", 0.0);
+-
+-  // Path handler parameters
+-  getParam(
+-    params_.path_handler_max_robot_pose_search_dist,
+-    "path_handler_max_robot_pose_search_dist", 1.5, ParameterType::Static);
+-  getParam(
+-    params_.path_handler_prune_distance, "path_handler_prune_distance", 1.5,
+-    ParameterType::Static);
+-  getParam(
+-    params_.path_handler_transform_tolerance, "path_handler_transform_tolerance", 0.1,
+-    ParameterType::Static);
+-  getParam(
+-    params_.path_handler_enforce_path_inversion, "path_handler_enforce_path_inversion", false,
+-    ParameterType::Static);
+-  getParam(
+-    params_.path_handler_inversion_xy_tolerance, "path_handler_inversion_xy_tolerance", 0.2,
+-    ParameterType::Static);
+-  getParam(
+-    params_.path_handler_inversion_yaw_tolerance, "path_handler_inversion_yaw_tolerance", 0.4,
+-    ParameterType::Static);
+-
+-  // Noise generator
+-  getParam(params_.noise_generator_regenerate_noises, "noise_generator_regenerate_noises", false);
+-
+-  // Optimizer parameters
+-  getParam(
+-    params_.optimizer_iteration_count, "optimizer_iteration_count", 1,
+-    ParameterType::Static);
+-  getParam(
+-    params_.optimizer_retry_attempt_limit, "optimizer_retry_attempt_limit", 1,
+-    ParameterType::Static);
+-  getParam(params_.optimizer_model_dt, "optimizer_model_dt", 0.05f, ParameterType::Static);
+-  getParam(params_.optimizer_time_steps, "optimizer_time_steps", 56, ParameterType::Static);
+-  getParam(
+-    params_.optimizer_temperature, "optimizer_temperature", 0.3f,
+-    ParameterType::Static);
+-  getParam(
+-    params_.optimizer_motion_model, "optimizer_motion_model", std::string("DiffDrive"),
+-    ParameterType::Static);
+-  getParam(
+-    params_.noise_generator_use_colored_noise, "noise_generator_use_colored_noise", true,
+-    ParameterType::Static);
+-
+-  // Trajectory visualizer parameters.
+-  getParam(
+-    params_.trajectory_visualizer_visualize_optimal,
+-    "trajectory_visualizer_visualize_optimal", true);
+-  getParam(
+-    params_.trajectory_visualizer_visualize_samples,
+-    "trajectory_visualizer_visualize_samples", false);
+-  getParam(params_.trajectory_visualizer_time_step, "trajectory_visualizer_time_step", 3);
+-  getParam(
+-    params_.trajectory_visualizer_samples_percentage,
+-    "trajectory_visualizer_samples_percentage", 0.05f, ParameterType::Static);
++  getParam(params_.path_handler_max_robot_pose_search_dist,
++    "max_robot_pose_search_dist", 1.5, ParameterType::Static);
++  getParam(params_.path_handler_prune_distance, "prune_distance", 1.5, ParameterType::Static);
++  getParam(params_.path_handler_transform_tolerance,
++    "transform_tolerance", 0.1, ParameterType::Static);
++  getParam(params_.path_handler_enforce_path_inversion,
++    "enforce_path_inversion", false, ParameterType::Static);
++  getParam(params_.path_handler_inversion_xy_tolerance,
++    "inversion_xy_tolerance", 0.2, ParameterType::Static);
++  getParam(params_.path_handler_inversion_yaw_tolerance,
++    "inversion_yaw_tolerance", 0.4, ParameterType::Static);
++  getParam(params_.noise_generator_regenerate_noises, "regenerate_noises", false);
++  getParam(params_.optimizer_iteration_count, "iteration_count", 1, ParameterType::Static);
++  getParam(params_.optimizer_retry_attempt_limit, "retry_attempt_limit", 1, ParameterType::Static);
++  getParam(params_.optimizer_model_dt, "model_dt", 0.05f, ParameterType::Static);
++  getParam(params_.optimizer_time_steps, "time_steps", 56, ParameterType::Static);
++  getParam(params_.optimizer_temperature, "temperature", 0.3f, ParameterType::Static);
++  getParam(params_.optimizer_motion_model,
++    "motion_model", std::string("DiffDrive"), ParameterType::Static);
++  getParam(params_.trajectory_visualizer_visualize_optimal, "visualize", false);
++  params_.trajectory_visualizer_visualize_samples = false;
++  getParam(params_.trajectory_visualizer_time_step, "TrajectoryVisualizer.time_step", 3);
++  params_.trajectory_visualizer_samples_percentage = 0.0f;
+ }
